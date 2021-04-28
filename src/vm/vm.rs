@@ -239,9 +239,9 @@ impl VM {
                 }
 
                 match call_body {
-                    Value::NativeFn(func) => {
+                    Value::NativeFn(this, func) => {
                         self.call_stack.push("NativeFunction".to_string());
-                        let res = Ok(func(call_params, self));
+                        let res = Ok(func(*this, call_params, self));
                         self.call_stack.pop();
                         res
                     },
@@ -269,36 +269,36 @@ impl VM {
     }
 
     pub fn init_core(&mut self) {
-        self.add_value("print".to_string(), Value::NativeFn(builtin::print_api), false);
-        self.add_value("typeof".to_string(), Value::NativeFn(builtin::typeof_api), false);
-        self.add_value("panic".to_string(), Value::NativeFn(builtin::panic_api), false);
-        self.add_value("readline".to_string(), Value::NativeFn(builtin::readline_api), false);
-        self.add_value("prompt".to_string(), Value::NativeFn(builtin::prompt_api), false);
-        self.add_value("confirm".to_string(), Value::NativeFn(builtin::confirm_api), false);
+        self.add_value("print".to_string(), Value::to_native_fn(builtin::print_api), false);
+        self.add_value("typeof".to_string(), Value::to_native_fn(builtin::typeof_api), false);
+        self.add_value("panic".to_string(), Value::to_native_fn(builtin::panic_api), false);
+        self.add_value("readline".to_string(), Value::to_native_fn(builtin::readline_api), false);
+        self.add_value("prompt".to_string(), Value::to_native_fn(builtin::prompt_api), false);
+        self.add_value("confirm".to_string(), Value::to_native_fn(builtin::confirm_api), false);
         self.add_value("inf".to_string(), Value::Num(fsize::INFINITY), false);
-        self.add_value("boolean".to_string(), Value::NativeFn(builtin::bool_api), false);
-        self.add_value("Ok".to_string(), Value::NativeFn(result::ok_api), false);
-        self.add_value("Err".to_string(), Value::NativeFn(result::err_api), false);
+        self.add_value("boolean".to_string(), Value::to_native_fn(builtin::bool_api), false);
+        self.add_value("Ok".to_string(), Value::to_native_fn(result::ok_api), false);
+        self.add_value("Err".to_string(), Value::to_native_fn(result::err_api), false);
 
         let math_entries = into_value_dict(vec![
-            ("floor", Value::NativeFn(math::floor_api), false),
-            ("round", Value::NativeFn(math::round_api), false),
-            ("ceil", Value::NativeFn(math::ceil_api), false),
-            ("trunc", Value::NativeFn(math::trunc_api), false),
-            ("abs", Value::NativeFn(math::abs_api), false),
-            ("sqrt", Value::NativeFn(math::sqrt_api), false),
-            ("sin", Value::NativeFn(math::sin_api), false),
-            ("cos", Value::NativeFn(math::cos_api), false),
-            ("tan", Value::NativeFn(math::tan_api), false),
-            ("random", Value::NativeFn(math::random_api), false),
-            ("randomRange", Value::NativeFn(math::random_range_api), false),
-            ("randomInt", Value::NativeFn(math::random_int_api), false),
+            ("floor", Value::to_native_fn(math::floor_api), false),
+            ("round", Value::to_native_fn(math::round_api), false),
+            ("ceil", Value::to_native_fn(math::ceil_api), false),
+            ("trunc", Value::to_native_fn(math::trunc_api), false),
+            ("abs", Value::to_native_fn(math::abs_api), false),
+            ("sqrt", Value::to_native_fn(math::sqrt_api), false),
+            ("sin", Value::to_native_fn(math::sin_api), false),
+            ("cos", Value::to_native_fn(math::cos_api), false),
+            ("tan", Value::to_native_fn(math::tan_api), false),
+            ("random", Value::to_native_fn(math::random_api), false),
+            ("randomRange", Value::to_native_fn(math::random_range_api), false),
+            ("randomInt", Value::to_native_fn(math::random_int_api), false),
             ("PI", Value::Num(3.141592653589793), false),
             ("E", Value::Num(2.718281828459045), false)
         ], self);
 
         let date_entries = into_value_dict(vec![
-            ("now", Value::NativeFn(date::get_current_time_ms_api), false)
+            ("now", Value::to_native_fn(date::get_current_time_ms_api), false)
         ], self);
 
         let mut window_entries = vec![
@@ -306,19 +306,19 @@ impl VM {
             ("platform", Value::Str(env::consts::OS.to_string()), false),
             ("arch", Value::Str(env::consts::ARCH.to_string()), false),
             ("platformFamily", Value::Str(env::consts::FAMILY.to_string()), false),
-            ("exit", Value::NativeFn(window::exit_api), false),
-            ("inspect", Value::NativeFn(window::inspect_api), false),
-            ("sleep", Value::NativeFn(window::sleep_api), false)
+            ("exit", Value::to_native_fn(window::exit_api), false),
+            ("inspect", Value::to_native_fn(window::inspect_api), false),
+            ("sleep", Value::to_native_fn(window::sleep_api), false)
         ];
 
         if self.permissions.contains(&"env".to_string()) {
             window_entries.push((
                 "env", 
                 (into_value_dict(vec![
-                    ("get", Value::NativeFn(window::get_env_api), false),
-                    ("set", Value::NativeFn(window::set_env_api), false),
-                    ("all", Value::NativeFn(window::all_env_api), false),
-                    ("delete", Value::NativeFn(window::delete_env_api), false)
+                    ("get", Value::to_native_fn(window::get_env_api), false),
+                    ("set", Value::to_native_fn(window::set_env_api), false),
+                    ("all", Value::to_native_fn(window::all_env_api), false),
+                    ("delete", Value::to_native_fn(window::delete_env_api), false)
                 ], self)),
                 false
             ));
@@ -328,9 +328,9 @@ impl VM {
             window_entries.push((
                 "memory",
                 into_value_dict(vec![
-                    ("getByPointer", Value::NativeFn(memory::get_by_pointer_api), false),
-                    ("push", Value::NativeFn(memory::push_api), false),
-                    ("len", Value::NativeFn(memory::len_api), false)
+                    ("getByPointer", Value::to_native_fn(memory::get_by_pointer_api), false),
+                    ("push", Value::to_native_fn(memory::push_api), false),
+                    ("len", Value::to_native_fn(memory::len_api), false)
                 ], self),
                 false
             ))

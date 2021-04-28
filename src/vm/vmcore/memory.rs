@@ -4,7 +4,7 @@ use crate::vm::vm::VM;
 use crate::common::fsize;
 use super::builtin::panic;
 
-pub fn push_api(args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn push_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     match args.get(0) {
         Some(arg) => {
             vm.value_stack.push(arg.clone());
@@ -14,7 +14,7 @@ pub fn push_api(args: Vec<Value>, vm: &mut VM) -> Value {
     }
 }
 
-pub fn get_by_pointer_api(args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn get_by_pointer_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     match args.get(0) {
         Some(Value::Num(num)) => {
             match vm.value_stack.get(*num as usize) {
@@ -26,6 +26,6 @@ pub fn get_by_pointer_api(args: Vec<Value>, vm: &mut VM) -> Value {
     }
 }
 
-pub fn len_api(_args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn len_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     Value::Num(vm.value_stack.len() as fsize - 1.0)
 }

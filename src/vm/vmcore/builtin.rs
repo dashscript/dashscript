@@ -22,7 +22,7 @@ pub fn inspect(val: Value, vm: &mut VM) -> String {
         Value::Num(num) => num.to_string(),
         Value::Boolean(bool) => bool.to_string(),
         Value::Null => "null".to_string(),
-        Value::NativeFn(_) => "[NativeFunction]".to_string(),
+        Value::NativeFn(_, _) => "[NativeFunction]".to_string(),
         Value::Dict(dict) => {
             let mut content = "{\n".to_string();
 
@@ -51,7 +51,7 @@ pub fn inspect_tiny(val: Value, _vm: &mut VM) -> String {
         Value::Num(num) => num.to_string(),
         Value::Boolean(bool) => bool.to_string(),
         Value::Null => "null".to_string(),
-        Value::NativeFn(_) => "[NativeFunction]".to_string(),
+        Value::NativeFn(_, _) => "[NativeFunction]".to_string(),
         Value::Dict(_) => "[Object]".to_string(),
         //_ => "unknown".to_string()
     }
@@ -69,7 +69,7 @@ pub fn panic(message: String, vm: &mut VM) -> ! {
     std::process::exit(0)
 }
 
-pub fn print_api(args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn print_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     for arg in args.iter() {
         println!("{}", inspect(arg.clone(), vm));
     }
@@ -77,14 +77,14 @@ pub fn print_api(args: Vec<Value>, vm: &mut VM) -> Value {
     Value::Null
 }
 
-pub fn typeof_api(args: Vec<Value>, _vm: &mut VM) -> Value {
+pub fn typeof_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     match args.get(0) {
         Some(val) => Value::Str(val.type_as_str()),
         _ => Value::Null
     }
 }
 
-pub fn panic_api(args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn panic_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     panic(match args.get(0) {
         Some(val) => match val {
             Value::Str(str) => str.to_string(),
@@ -94,11 +94,11 @@ pub fn panic_api(args: Vec<Value>, vm: &mut VM) -> Value {
     }, vm);
 }
 
-pub fn readline_api(_args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn readline_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     readline(vm)
 }
 
-pub fn prompt_api(args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn prompt_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     match args.get(0) {
         Some(val) => match val {
             Value::Str(str) => println!("{}", str),
@@ -110,7 +110,7 @@ pub fn prompt_api(args: Vec<Value>, vm: &mut VM) -> Value {
     readline(vm)
 }
 
-pub fn confirm_api(args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn confirm_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     match args.get(0) {
         Some(val) => match val {
             Value::Str(str) => println!("{}", str),
@@ -128,7 +128,7 @@ pub fn confirm_api(args: Vec<Value>, vm: &mut VM) -> Value {
     }
 }
 
-pub fn bool_api(args: Vec<Value>, _vm: &mut VM) -> Value {
+pub fn bool_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     match args.get(0) {
         Some(Value::Boolean(false)) | Some(Value::Null) => Value::Boolean(false),
         Some(Value::Num(num)) => Value::Boolean(num.clone() == 0.0),

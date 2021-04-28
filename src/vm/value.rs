@@ -27,8 +27,7 @@ impl Hash for FloatLike {
     }
 }
 
-pub type NativeFn = fn (Vec<Value>, &mut VM) -> Value;
-pub type BoundNativeFn = fn (this: Value, Vec<Value>, &mut VM) -> Value;
+pub type NativeFn = fn (this: Value, Vec<Value>, &mut VM) -> Value;
 
 #[derive(Clone, Hash, PartialEq, Debug)]
 pub enum ValueIndex {
@@ -46,12 +45,15 @@ pub enum Value {
     Str(String),
     Num(fsize),
     Dict(HashMap<ValueIndex, (u32, bool)>),
-    NativeFn(NativeFn),
-    BoundNativeFn(Box<Value>, BoundNativeFn),
+    NativeFn(Box<Value>, NativeFn),
     Null
 }
 
 impl Value {
+
+    pub fn to_native_fn(func: NativeFn) -> Self {
+        Self::NativeFn(Box::new(Value::Null), func)
+    }
 
     pub fn type_as_str(&self) -> String {
         String::from(
@@ -60,7 +62,7 @@ impl Value {
                 Value::Null => "null",
                 Value::Str(_) => "string",
                 Value::Num(_) => "number",
-                Value::NativeFn(_) | Value::BoundNativeFn(_, _) => "function",
+                Value::NativeFn(_, _) => "function",
                 Value::Dict(_) => "object"
             }
         )
