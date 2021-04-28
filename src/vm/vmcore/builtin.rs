@@ -5,12 +5,22 @@ use crate::common::get_line_col_by_line_data;
 use super::result::{ ok, err };
 use super::into_value_dict;
 
+pub fn readline(vm: &mut VM) -> Value {
+    let mut result = String::new();
+    match stdin().read_line(&mut result) {
+        Ok(_) => ok(Value::Str(result), vm),
+        Err(e) => err(into_value_dict(vec![
+            ("kind", Value::Str(format!("{:?}", e.kind())), false),
+            ("message", Value::Str(format!("{:?}", e)), false)
+        ], vm), vm)
+    }
+}
+
 pub fn inspect(val: Value, vm: &mut VM) -> String {
     match val {
         Value::Str(str) => str.to_string(),
         Value::Num(num) => num.to_string(),
-        Value::True => "true".to_string(),
-        Value::False => "false".to_string(),
+        Value::Boolean(bool) => bool.to_string(),
         Value::Null => "null".to_string(),
         Value::NativeFn(_) => "[NativeFunction]".to_string(),
         Value::Dict(dict) => {
@@ -21,8 +31,7 @@ pub fn inspect(val: Value, vm: &mut VM) -> String {
                     "    {}: {},\n", 
                     match entry.0 {
                         ValueIndex::Str(str) => str.to_string(),
-                        ValueIndex::True => "[true]".to_string(),
-                        ValueIndex::False => "[false]".to_string(),
+                        ValueIndex::Boolean(bool) => format!("[{}]", *bool),
                         ValueIndex::Null => "[null]".to_string(),
                         ValueIndex::Num(num) => num.0.to_string()
                     }, 
@@ -40,8 +49,7 @@ pub fn inspect_tiny(val: Value, _vm: &mut VM) -> String {
     match val {
         Value::Str(str) => format!("\"{}\"", str),
         Value::Num(num) => num.to_string(),
-        Value::True => "true".to_string(),
-        Value::False => "false".to_string(),
+        Value::Boolean(bool) => bool.to_string(),
         Value::Null => "null".to_string(),
         Value::NativeFn(_) => "[NativeFunction]".to_string(),
         Value::Dict(_) => "[Object]".to_string(),
@@ -86,17 +94,6 @@ pub fn panic_api(args: Vec<Value>, vm: &mut VM) -> Value {
     }, vm);
 }
 
-pub fn readline(vm: &mut VM) -> Value {
-    let mut result = String::new();
-    match stdin().read_line(&mut result) {
-        Ok(_) => ok(Value::Str(result), vm),
-        Err(e) => err(into_value_dict(vec![
-            ("kind", Value::Str(format!("{:?}", e.kind())), false),
-            ("message", Value::Str(format!("{:?}", e)), false)
-        ], vm), vm)
-    }
-}
-
 pub fn readline_api(_args: Vec<Value>, vm: &mut VM) -> Value {
     readline(vm)
 }
@@ -124,17 +121,17 @@ pub fn confirm_api(args: Vec<Value>, vm: &mut VM) -> Value {
 
     match readline(vm) {
         Value::Str(str) => match str.as_str() {
-            "y" | "Y" => Value::True,
-            _ => Value::False
+            "y" | "Y" => Value::Boolean(true),
+            _ => Value::Boolean(false)
         },
-        _ => Value::False
+        _ => Value::Boolean(false)
     }
 }
 
 pub fn bool_api(args: Vec<Value>, _vm: &mut VM) -> Value {
     match args.get(0) {
-        Some(Value::False) | Some(Value::Null) => Value::False,
-        Some(Value::Num(num)) => if num.clone() == 0.0 { Value::False } else { Value::True },
-        _ => Value::True
+        Some(Value::Boolean(false)) | Some(Value::Null) => Value::Boolean(false),
+        Some(Value::Num(num)) => Value::Boolean(num.clone() == 0.0),
+        _ => Value::Boolean(true)
     }
 }

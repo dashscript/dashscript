@@ -1,5 +1,6 @@
 use crate::vm::{ value::Value, vm::VM };
 use super::into_value_dict;
+use crate::vm::value::NativeFn;
 
 pub fn ok(val: Value, vm: &mut VM) -> Value {
     into_value_dict(vec![

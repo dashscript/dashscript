@@ -179,8 +179,8 @@ impl VM {
 
     pub fn execute_value(&mut self, value: InstructionValue, pos: usize) -> Result<Value, RuntimeError> {
         match value {
-            InstructionValue::True => Ok(Value::True),
-            InstructionValue::False => Ok(Value::False),
+            InstructionValue::True => Ok(Value::Boolean(true)),
+            InstructionValue::False => Ok(Value::Boolean(false)),
             InstructionValue::Null => Ok(Value::Null),
             InstructionValue::Group(content) => Ok(self.execute_value(*content, pos)?),
             InstructionValue::Str(id) => Ok(Value::Str(self.reader.get_constant(id as usize))),
@@ -275,10 +275,10 @@ impl VM {
         self.add_value("readline".to_string(), Value::NativeFn(builtin::readline_api), false);
         self.add_value("prompt".to_string(), Value::NativeFn(builtin::prompt_api), false);
         self.add_value("confirm".to_string(), Value::NativeFn(builtin::confirm_api), false);
+        self.add_value("inf".to_string(), Value::Num(fsize::INFINITY), false);
+        self.add_value("boolean".to_string(), Value::NativeFn(builtin::bool_api), false);
         self.add_value("Ok".to_string(), Value::NativeFn(result::ok_api), false);
         self.add_value("Err".to_string(), Value::NativeFn(result::err_api), false);
-        self.add_value("bool".to_string(), Value::NativeFn(builtin::bool_api), false);
-        self.add_value("inf".to_string(), Value::Num(fsize::INFINITY), false);
 
         let math_entries = into_value_dict(vec![
             ("floor", Value::NativeFn(math::floor_api), false),

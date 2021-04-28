@@ -12,6 +12,7 @@ impl FloatLike {
     }
 }
 
+// TODO(Scientific-Guy): Make something better for comparison rather than matching bytes.
 impl PartialEq for FloatLike {
     fn eq(&self, other: &Self) -> bool {
         self.to_bytes() == other.to_bytes()
@@ -27,27 +28,27 @@ impl Hash for FloatLike {
 }
 
 pub type NativeFn = fn (Vec<Value>, &mut VM) -> Value;
+pub type BoundNativeFn = fn (this: Value, Vec<Value>, &mut VM) -> Value;
 
 #[derive(Clone, Hash, PartialEq, Debug)]
 pub enum ValueIndex {
-    True,
-    False,
-    Null,
+    Boolean(bool),
     Str(String),
-    Num(FloatLike)
+    Num(FloatLike),
+    Null
 }
 
 impl Eq for ValueIndex {}
 
 #[derive(Clone)]
 pub enum Value {
-    True,
-    False,
-    Null,
+    Boolean(bool),
     Str(String),
     Num(fsize),
     Dict(HashMap<ValueIndex, (u32, bool)>),
-    NativeFn(NativeFn)
+    NativeFn(NativeFn),
+    BoundNativeFn(Box<Value>, BoundNativeFn),
+    Null
 }
 
 impl Value {
@@ -55,11 +56,11 @@ impl Value {
     pub fn type_as_str(&self) -> String {
         String::from(
             match self {
-                Value::True | Value::False => "boolean",
+                Value::Boolean(_) => "boolean",
                 Value::Null => "null",
                 Value::Str(_) => "string",
                 Value::Num(_) => "number",
-                Value::NativeFn(_) => "function",
+                Value::NativeFn(_) | Value::BoundNativeFn(_, _) => "function",
                 Value::Dict(_) => "object"
             }
         )
@@ -67,8 +68,7 @@ impl Value {
 
     pub fn to_value_index(&self) -> ValueIndex {
         match self {
-            Value::True => ValueIndex::True,
-            Value::False => ValueIndex::False,
+            Value::Boolean(bool) => ValueIndex::Boolean(*bool),
             Value::Num(num) => ValueIndex::Num(FloatLike(num.clone())),
             Value::Str(str) => ValueIndex::Str(str.clone()),
             _ => ValueIndex::Null
