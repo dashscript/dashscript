@@ -8,6 +8,6 @@ pub fn get_current_time() -> Duration {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
 }
 
-pub fn get_current_time_ms_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn get_current_time_ms_api(_this: Value, _args: Vec<Value>, _vm: &mut VM) -> Value {
     Value::Num(get_current_time().as_millis() as fsize)
 }

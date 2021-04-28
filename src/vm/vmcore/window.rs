@@ -22,7 +22,7 @@ pub fn inspect_tiny_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     })
 }
 
-pub fn exit_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn exit_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
     std::process::exit(match args.get(0) {
         Some(Value::Num(num)) => *num as i32,
         _ => 0
@@ -75,7 +75,7 @@ pub fn delete_env_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     Value::Null
 }
 
-pub fn all_env_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn all_env_api(_this: Value, _args: Vec<Value>, vm: &mut VM) -> Value {
     let mut entries = HashMap::new();
 
     for var in env::vars() {

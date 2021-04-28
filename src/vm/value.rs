@@ -45,6 +45,7 @@ pub enum Value {
     Str(String),
     Num(fsize),
     Dict(HashMap<ValueIndex, (u32, bool)>),
+    // TODO(Scientific-Guy): Think a better way for native functions.
     NativeFn(Box<Value>, NativeFn),
     Null
 }

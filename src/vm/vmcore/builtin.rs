@@ -77,7 +77,7 @@ pub fn print_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     Value::Null
 }
 
-pub fn typeof_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn typeof_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
     match args.get(0) {
         Some(val) => Value::Str(val.type_as_str()),
         _ => Value::Null
@@ -94,7 +94,7 @@ pub fn panic_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     }, vm);
 }
 
-pub fn readline_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn readline_api(_this: Value, _args: Vec<Value>, vm: &mut VM) -> Value {
     readline(vm)
 }
 
@@ -128,7 +128,7 @@ pub fn confirm_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     }
 }
 
-pub fn bool_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn bool_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
     match args.get(0) {
         Some(Value::Boolean(false)) | Some(Value::Null) => Value::Boolean(false),
         Some(Value::Num(num)) => Value::Boolean(num.clone() == 0.0),

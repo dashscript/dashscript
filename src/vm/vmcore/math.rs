@@ -47,47 +47,47 @@ fn arg_to_float(arg: Option<&Value>) -> fsize {
     }
 }
 
-pub fn floor_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn floor_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
     Value::Num(arg_to_float(args.get(0)).floor())
 }
 
-pub fn trunc_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn trunc_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
     Value::Num(arg_to_float(args.get(0)).trunc())
 }
 
-pub fn ceil_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn ceil_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
     Value::Num(arg_to_float(args.get(0)).ceil())
 }
 
-pub fn round_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn round_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
     Value::Num(arg_to_float(args.get(0)).round())
 }
 
-pub fn abs_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn abs_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
     Value::Num(arg_to_float(args.get(0)).abs())
 }
 
-pub fn sqrt_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn sqrt_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
     Value::Num(arg_to_float(args.get(0)).sqrt())
 }
 
-pub fn sin_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn sin_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
     Value::Num(arg_to_float(args.get(0)).sin())
 }
 
-pub fn cos_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn cos_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
     Value::Num(arg_to_float(args.get(0)).cos())
 }
 
-pub fn tan_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn tan_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
     Value::Num(arg_to_float(args.get(0)).tan())
 }
 
-pub fn random_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn random_api(_this: Value, _args: Vec<Value>, _vm: &mut VM) -> Value {
     Value::Num(Rng::new().random() as fsize / u32::MAX as fsize)
 }
 
-pub fn random_int_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn random_int_api(_this: Value, _args: Vec<Value>, _vm: &mut VM) -> Value {
     Value::Num(Rng::new().random() as fsize)
 }
 

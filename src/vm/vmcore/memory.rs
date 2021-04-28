@@ -26,6 +26,6 @@ pub fn get_by_pointer_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value 
     }
 }
 
-pub fn len_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn len_api(_this: Value, _args: Vec<Value>, vm: &mut VM) -> Value {
     Value::Num(vm.value_stack.len() as fsize - 1.0)
 }
