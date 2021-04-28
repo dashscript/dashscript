@@ -1,0 +1,15 @@
+# Dependencies
+target/
+Cargo.lock
+
+# The list of lexing errors. Will be pushed in the spec repo.
+errors.md 
+
+# All the testings
+kek.exe
+main.ds
+main.exe
+main.pdb
+test.exe
+test.pdb
+test.rs
