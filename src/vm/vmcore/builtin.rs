@@ -91,9 +91,10 @@ pub fn panic(message: String, vm: &mut VM) -> ! {
 
 pub fn print_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     for arg in args.iter() {
-        println!("{}", inspect(arg.clone(), vm));
+        print!("{}", inspect(arg.clone(), vm));
     }
 
+    print!("\n");
     Value::Null
 }
 
