@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::common::fsize;
 use super::value::{ Value, ValueRegister, ValueIndex };
 use super::vmcore::{ builtin, window, result, memory, into_value_dict, math, date, builtin::inspect };
+use super::vmcore;
 
 use crate::{
     lexer::parser::Position,
@@ -382,6 +383,30 @@ impl VM {
                     self.execute_value(*falsy, pos)
                 }
             },
+            InstructionValue::Add(a, b) => Ok(vmcore::add_values(
+                self.execute_value(*a, pos)?,
+                self.execute_value(*b, pos)?
+            )),
+            InstructionValue::Sub(a, b) => Ok(vmcore::sub_values(
+                self.execute_value(*a, pos)?,
+                self.execute_value(*b, pos)?,
+                self
+            )),
+            InstructionValue::Mult(a, b) => Ok(vmcore::mult_values(
+                self.execute_value(*a, pos)?,
+                self.execute_value(*b, pos)?,
+                self
+            )),
+            InstructionValue::Div(a, b) => Ok(vmcore::div_values(
+                self.execute_value(*a, pos)?,
+                self.execute_value(*b, pos)?,
+                self
+            )),
+            InstructionValue::Pow(a, b) => Ok(vmcore::pow_values(
+                self.execute_value(*a, pos)?,
+                self.execute_value(*b, pos)?,
+                self
+            )),
             i => Err(self.create_error(
                 format!("UnknownRuntimeError: Unexpected value while rendering: {:?}.", i), 
                 pos

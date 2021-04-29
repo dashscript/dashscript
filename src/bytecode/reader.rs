@@ -32,6 +32,7 @@ pub enum InstructionValue {
     Invert(Box<InstructionValue>),
     And(Box<InstructionValue>, Box<InstructionValue>),
     Or(Box<InstructionValue>, Box<InstructionValue>),
+    // TODO(Scientific-Guy): Support for `in` keyword places rather only in for loops.
     In(Box<InstructionValue>, Box<InstructionValue>),
     Func(u32, Vec<u32>, Vec<u8>),
     True,

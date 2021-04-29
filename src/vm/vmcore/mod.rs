@@ -30,3 +30,54 @@ pub fn into_value_array(data_set: Vec<Value>, vm: &mut VM) -> Value {
 
     Value::Array(items)
 }
+
+pub fn add_values(a: Value, b: Value) -> Value {
+    match (a, b) {
+        (Value::Str(a), Value::Str(b)) => Value::Str(a + b.as_str()),
+        (Value::Num(a), Value::Num(b)) => Value::Num(a + b),
+        (Value::Null, Value::Num(b)) => Value::Num(b),
+        (a, b) => Value::Str(builtin::inspect_tiny(a) + builtin::inspect_tiny(b).as_str())
+    }
+}
+
+pub fn sub_values(a: Value, b: Value, vm: &mut VM) -> Value {
+    match (a, b) {
+        (Value::Num(a), Value::Num(b)) => Value::Num(a - b),
+        (Value::Null, Value::Num(b)) => Value::Num(0.0 - b),
+        (a, b) => builtin::panic(
+            format!("ImproperArithmeticOperation: You cannot subtract value of type {} with type {}.", a.type_as_str(), b.type_as_str()),
+            vm
+        )
+    }
+}
+
+pub fn mult_values(a: Value, b: Value, vm: &mut VM) -> Value {
+    match (a, b) {
+        (Value::Num(a), Value::Num(b)) => Value::Num(a * b),
+        (Value::Str(a), Value::Num(b)) => Value::Str(a.repeat(b as usize)),
+        (a, b) => builtin::panic(
+            format!("ImproperArithmeticOperation: You cannot multiply value of type {} with type {}.", a.type_as_str(), b.type_as_str()),
+            vm
+        )
+    }
+}
+
+pub fn div_values(a: Value, b: Value, vm: &mut VM) -> Value {
+    match (a, b) {
+        (Value::Num(a), Value::Num(b)) => Value::Num(a / b),
+        (a, b) => builtin::panic(
+            format!("ImproperArithmeticOperation: You cannot divide value of type {} with type {}.", a.type_as_str(), b.type_as_str()),
+            vm
+        )
+    }
+}
+
+pub fn pow_values(a: Value, b: Value, vm: &mut VM) -> Value {
+    match (a, b) {
+        (Value::Num(a), Value::Num(b)) => Value::Num(a.powf(b)),
+        (a, b) => builtin::panic(
+            format!("ImproperArithmeticOperation: You cannot power value of type {} with type {}.", a.type_as_str(), b.type_as_str()),
+            vm
+        )
+    }
+}

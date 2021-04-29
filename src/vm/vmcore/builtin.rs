@@ -44,7 +44,7 @@ pub fn inspect(val: Value, vm: &mut VM) -> String {
                         ValueIndex::Null => "[null]".to_string(),
                         ValueIndex::Num(num) => num.0.to_string()
                     }, 
-                    inspect_tiny(vm.value_stack[entry.1.0 as usize].clone(), vm)
+                    inspect_tiny(vm.value_stack[entry.1.0 as usize].clone())
                 ).to_owned()
             }
 
@@ -54,7 +54,7 @@ pub fn inspect(val: Value, vm: &mut VM) -> String {
             let mut content = "[\n".to_string();
 
             for item in vec.iter() {
-                content += format!("    {},\n", inspect_tiny(vm.value_stack.get(*item as usize).unwrap().clone(), vm)).as_str();
+                content += format!("    {},\n", inspect_tiny(vm.value_stack.get(*item as usize).unwrap().clone())).as_str();
             }
 
             content + "]"
@@ -63,7 +63,7 @@ pub fn inspect(val: Value, vm: &mut VM) -> String {
     }
 }
 
-pub fn inspect_tiny(val: Value, _vm: &mut VM) -> String {
+pub fn inspect_tiny(val: Value) -> String {
     match val {
         Value::Str(str) => format!("\"{}\"", str),
         Value::Num(num) => num.to_string(),

@@ -15,9 +15,9 @@ pub fn inspect_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     })
 }
 
-pub fn inspect_tiny_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn inspect_tiny_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
     Value::Str(match args.get(0) {
-        Some(val) => inspect_tiny(val.clone(), vm),
+        Some(val) => inspect_tiny(val.clone()),
         None => "null".to_string()
     })
 }
