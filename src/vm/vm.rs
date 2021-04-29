@@ -87,6 +87,12 @@ impl VM {
                 self.add_value(name, value, true);
                 Ok(())
             },
+            Instruction::Const(pos, name, value) => {
+                let name = self.reader.get_constant(name as usize);
+                let value = self.execute_value(value, pos)?;
+                self.add_value(name, value, false);
+                Ok(())
+            },
             Instruction::Assign(pos, target, op, value) => {
                 let val = self.execute_value(value, pos)?;
                 self.execute_assignment(target, pos, val, op, true, 0)?;

@@ -54,6 +54,7 @@ pub enum InstructionValue {
 #[derive(Debug, Clone)]
 pub enum Instruction {
     Var(usize, u32, InstructionValue),
+    Const(usize, u32, InstructionValue),
     Assign(usize, InstructionValue, u8, InstructionValue),
     Return(usize, InstructionValue),
     Break(usize),
@@ -83,6 +84,16 @@ impl BytecodeReader {
         self.ci += 1;
         let instruction = match Opcode::from(op) {
             Opcode::Var => Instruction::Var(
+                self.ci-1,
+                self.get_len_based_constant_idx(),
+                { 
+                    self.ci += 1;
+                    let op = Opcode::from(self.bytes[self.ci]);
+                    self.ci += 1;
+                    self.parse_value(op)
+                }
+            ),
+            Opcode::Const => Instruction::Const(
                 self.ci-1,
                 self.get_len_based_constant_idx(),
                 { 
