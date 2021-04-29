@@ -120,6 +120,7 @@ impl AST {
 
                     self.ci += 1;
                     let falsy = self.parse_value("dserror(33): Improper ternary operator.");
+                    self.ci += 1;
                     res = Identifier::Ternary(
                         Box::new(res),
                         Box::new(truthy),

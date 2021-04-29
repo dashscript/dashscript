@@ -375,6 +375,13 @@ impl VM {
                     builtin::bool(self.execute_value(*ident2, pos)?)
                 ))
             },
+            InstructionValue::Ternary(bool, truthy, falsy) => {
+                if builtin::bool(self.execute_value(*bool, pos)?) {
+                    self.execute_value(*truthy, pos)
+                } else {
+                    self.execute_value(*falsy, pos)
+                }
+            },
             i => Err(self.create_error(
                 format!("UnknownRuntimeError: Unexpected value while rendering: {:?}.", i), 
                 pos
