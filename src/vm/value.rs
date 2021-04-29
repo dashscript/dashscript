@@ -54,6 +54,23 @@ pub enum Value {
     Null
 }
 
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Str(a), Value::Str(b)) => a == b,
+            (Value::Num(a), Value::Num(b)) => a == b,
+            (Value::Boolean(a), Value::Boolean(b)) => a == b,
+            (Value::Func(_, _, a), Value::Func(_, _, b)) => a == b,
+            (Value::NativeFn(_, a), Value::NativeFn(_, b)) => a as *const NativeFn == b as *const NativeFn,
+            (Value::Dict(a), Value::Dict(b)) => a == b,
+            (Value::Null, Value::Null) => true,
+            _ => false
+        }
+    }
+}
+
+impl Eq for Value {}
+
 impl Value {
 
     pub fn to_native_fn(func: NativeFn) -> Self {
