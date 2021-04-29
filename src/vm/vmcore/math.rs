@@ -40,7 +40,7 @@ impl Rng {
 
 }
 
-fn arg_to_float(arg: Option<&Value>) -> fsize {
+fn unwrap_float(arg: Option<&Value>) -> fsize {
     match arg {
         Some(Value::Num(num)) => *num,
         _ => 0.0
@@ -48,39 +48,39 @@ fn arg_to_float(arg: Option<&Value>) -> fsize {
 }
 
 pub fn floor_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
-    Value::Num(arg_to_float(args.get(0)).floor())
+    Value::Num(unwrap_float(args.get(0)).floor())
 }
 
 pub fn trunc_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
-    Value::Num(arg_to_float(args.get(0)).trunc())
+    Value::Num(unwrap_float(args.get(0)).trunc())
 }
 
 pub fn ceil_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
-    Value::Num(arg_to_float(args.get(0)).ceil())
+    Value::Num(unwrap_float(args.get(0)).ceil())
 }
 
 pub fn round_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
-    Value::Num(arg_to_float(args.get(0)).round())
+    Value::Num(unwrap_float(args.get(0)).round())
 }
 
 pub fn abs_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
-    Value::Num(arg_to_float(args.get(0)).abs())
+    Value::Num(unwrap_float(args.get(0)).abs())
 }
 
 pub fn sqrt_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
-    Value::Num(arg_to_float(args.get(0)).sqrt())
+    Value::Num(unwrap_float(args.get(0)).sqrt())
 }
 
 pub fn sin_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
-    Value::Num(arg_to_float(args.get(0)).sin())
+    Value::Num(unwrap_float(args.get(0)).sin())
 }
 
 pub fn cos_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
-    Value::Num(arg_to_float(args.get(0)).cos())
+    Value::Num(unwrap_float(args.get(0)).cos())
 }
 
 pub fn tan_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
-    Value::Num(arg_to_float(args.get(0)).tan())
+    Value::Num(unwrap_float(args.get(0)).tan())
 }
 
 pub fn random_api(_this: Value, _args: Vec<Value>, _vm: &mut VM) -> Value {

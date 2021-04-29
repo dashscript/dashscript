@@ -1,11 +1,8 @@
 use std::env;
 use std::collections::HashMap;
 use crate::common::fsize;
-
-use super::{ 
-    value::{ Value, ValueRegister, ValueIndex },
-    vmcore::{ builtin, window, result, memory, into_value_dict, math, date, builtin::inspect }
-};
+use super::value::{ Value, ValueRegister, ValueIndex };
+use super::vmcore::{ builtin, window, result, memory, into_value_dict, math, date, builtin::inspect };
 
 use crate::{
     lexer::parser::Position,
@@ -211,6 +208,67 @@ impl VM {
                     Value::Str(str) => match attr {
                         ValueIndex::Str(attr) => Ok(match attr.as_str() {
                             "length" => Value::Num(str.len() as fsize),
+                            "toLowerCase" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, _| {
+                                if let Value::Str(str) = this {
+                                    Value::Str(str.to_lowercase())
+                                } else {
+                                    Value::Null
+                                }
+                            }),
+                            "toUpperCase" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, _| {
+                                if let Value::Str(str) = this {
+                                    Value::Str(str.to_uppercase())
+                                } else {
+                                    Value::Null
+                                }
+                            }),
+                            "toNumber" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, vm| {
+                                if let Value::Str(str) = this {
+                                    match str.parse::<fsize>() {
+                                        Ok(num) => result::ok(Value::Num(num), vm),
+                                        Err(e) => result::err(Value::Str(format!("{}", e)), vm)
+                                    }
+                                } else {
+                                    result::err(Value::Str("Improper number..".to_string()), vm)
+                                }
+                            }),
+                            "startsWith" => Value::NativeFn(Box::new(Value::Str(str)), |this, args, vm| {
+                                let str2 = match args.get(0) {
+                                    Some(Value::Str(str)) => str.clone(),
+                                    _ => builtin::panic("InvalidArgumentError: Expected 1 string type argument but found none.".to_string(), vm)
+                                };
+
+                                if let Value::Str(str) = this {
+                                    Value::Boolean(str.starts_with(str2.as_str()))
+                                } else {
+                                    Value::Boolean(false)
+                                }
+                            }),
+                            "endsWith" => Value::NativeFn(Box::new(Value::Str(str)), |this, args, vm| {
+                                let str2 = match args.get(0) {
+                                    Some(Value::Str(str)) => str.clone(),
+                                    _ => builtin::panic("InvalidArgumentError: Expected 1 string type argument but found none.".to_string(), vm)
+                                };
+
+                                if let Value::Str(str) = this {
+                                    Value::Boolean(str.ends_with(str2.as_str()))
+                                    
+                                } else {
+                                    Value::Boolean(false)
+                                }
+                            }),
+                            "includes" => Value::NativeFn(Box::new(Value::Str(str)), |this, args, vm| {
+                                let str2 = match args.get(0) {
+                                    Some(Value::Str(str)) => str.clone(),
+                                    _ => builtin::panic("InvalidArgumentError: Expected 1 string type argument but found none.".to_string(), vm)
+                                };
+
+                                if let Value::Str(str) = this {
+                                    Value::Boolean(str.contains(str2.as_str()))
+                                } else {
+                                    Value::Boolean(false)
+                                }
+                            }),
                             _ => return Err(self.create_error(
                                 format!("UnexpectedAttributeAccess: Unknown property {:?} accessing a string.", attr),
                                 pos
@@ -306,6 +364,7 @@ impl VM {
             ("platform", Value::Str(env::consts::OS.to_string()), false),
             ("arch", Value::Str(env::consts::ARCH.to_string()), false),
             ("platformFamily", Value::Str(env::consts::FAMILY.to_string()), false),
+            ("version", Value::Str("1.0.0".to_string()), false),
             ("exit", Value::to_native_fn(window::exit_api), false),
             ("inspect", Value::to_native_fn(window::inspect_api), false),
             ("sleep", Value::to_native_fn(window::sleep_api), false)
