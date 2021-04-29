@@ -31,6 +31,7 @@ pub fn inspect(val: Value, vm: &mut VM) -> String {
         Value::Boolean(bool) => bool.to_string(),
         Value::Null => "null".to_string(),
         Value::NativeFn(_, _) => "[NativeFunction]".to_string(),
+        Value::Func(_, _, _) => "[Function]".to_string(),
         Value::Dict(dict) => {
             let mut content = "{\n".to_string();
 
@@ -70,7 +71,8 @@ pub fn inspect_tiny(val: Value, _vm: &mut VM) -> String {
         Value::Null => "null".to_string(),
         Value::NativeFn(_, _) => "[NativeFunction]".to_string(),
         Value::Dict(_) => "[Object]".to_string(),
-        Value::Array(_) => "[Array]".to_string()
+        Value::Array(_) => "[Array]".to_string(),
+        Value::Func(_, _, _) => "[Function]".to_string()
         //_ => "unknown".to_string()
     }
 }
