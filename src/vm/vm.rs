@@ -283,6 +283,23 @@ impl VM {
                             pos
                         )), 
                     },
+                    Value::Array(arr) => match attr {
+                        ValueIndex::Num(num) => {
+                            let index = match arr.get(num.0 as usize) {
+                                Some(val) => *val,
+                                None => return Ok(Value::Null)
+                            } as usize;
+
+                            Ok(match self.value_stack.get(index) {
+                                Some(val) => val.clone(),
+                                None => builtin::panic(format!("MemoryFailure: Could not find pointer {}.", index), self)
+                            })
+                        },
+                        attr => return Err(self.create_error(
+                            format!("UnexpectedAttributeAccess: Cannot find attribute {:?} in array.", attr), 
+                            pos
+                        ))
+                    },
                     _ => return Err(self.create_error(
                         format!("UnexpectedAttributeAccess: You cannot access attributes of type {}.", body.type_as_str()), 
                         pos

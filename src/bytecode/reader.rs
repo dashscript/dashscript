@@ -211,13 +211,12 @@ impl BytecodeReader {
                 let mut arr = Vec::new();
 
                 for _ in 0..len {
+                    self.ci += 1;
                     arr.push({
                         let op = Opcode::from(self.bytes[self.ci]);
                         self.ci += 1;
                         self.parse_value(op)
                     });
-
-                    self.ci += 1;
                 }
 
                 InstructionValue::Array(arr)
