@@ -1,13 +1,6 @@
-use crate::{
-    lexer::parser::Position,
-    ast::{
-        main::AST,
-        types::{
-            StatementType,
-            Identifier
-        }
-    }
-};
+use crate::lexer::parser::Position;
+use crate::ast::main::AST;
+use crate::ast::types::{ StatementType, Statement, Identifier };
 
 #[derive(Debug, Clone)]
 pub struct BytecodeCompiler {
@@ -48,6 +41,7 @@ pub enum Opcode {
     And,
     In,
     Func,
+    FuncEnd,
     Long, // Used to discriminate is the index u32
     Short // Used to discriminate is the index u8
 }
@@ -77,27 +71,29 @@ impl BytecodeCompiler {
 
         while i < self.ast.statements.len() {
             let stmt = self.ast.statements[i].clone();
-
-            match &stmt.val {
-                StatementType::Var(name, val, is_const) => {
-                    self.bytes.push(if *is_const { Opcode::Const } else { Opcode::Var } as u8);
-                    self.push_constant_without_op(name);
-                    self.load_identifier(val);
-                },
-                StatementType::Assign(ident, op, val) => {
-                    self.bytes.push(Opcode::Assign as u8);
-                    self.load_identifier(ident);
-                    self.bytes.push(op.clone() as u8);
-                    self.load_identifier(val);
-                },
-                StatementType::Primary(ident) => {
-                    self.push_pos(stmt.pos);
-                    self.load_identifier(ident);
-                },
-                _ => ()
-            }
-
+            self.parse_byte(stmt);
             i += 1;
+        }
+    }
+
+    pub fn parse_byte(&mut self, stmt: Statement) {
+        self.push_pos(stmt.pos);
+        match &stmt.val {
+            StatementType::Var(name, val, is_const) => {
+                self.bytes.push(if *is_const { Opcode::Const } else { Opcode::Var } as u8);
+                self.push_constant_without_op(name);
+                self.load_identifier(val);
+            },
+            StatementType::Assign(ident, op, val) => {
+                self.bytes.push(Opcode::Assign as u8);
+                self.load_identifier(ident);
+                self.bytes.push(op.clone() as u8);
+                self.load_identifier(val);
+            },
+            StatementType::Primary(ident) => {
+                self.load_identifier(ident);
+            }
+            _ => ()
         }
     }
 
@@ -170,6 +166,20 @@ impl BytecodeCompiler {
                     self.push_constant_without_op(&i.0.to_owned());
                     self.load_identifier(&i.1);
                 }
+            },
+            Identifier::Func(name, params, stmts) => {
+                self.bytes.push(Opcode::Func as u8);
+                self.push_constant_without_op(name);
+                self.bytes.push(params.len() as u8);
+                for param in params { self.push_constant_without_op(param) };
+                
+                let mut i = 0;
+                while i < stmts.len() {
+                    self.parse_byte(stmts[i].clone());
+                    i += 1;
+                }
+
+                self.bytes.push(Opcode::FuncEnd as u8);
             },
             Identifier::Group(ident) => {
                 self.bytes.push(Opcode::Group as u8);

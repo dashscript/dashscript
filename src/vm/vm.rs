@@ -345,6 +345,10 @@ impl VM {
                     self.execute_value(*falsy_value, pos)?
                 }
             }),
+            InstructionValue::Func(_, _, _) => {
+                println!("{:?}", value);
+                Ok(Value::Null)
+            },
             _ => Err(self.create_error(
                 format!("UnknownRuntimeError: Unexpected value while rendering."), 
                 pos

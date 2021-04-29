@@ -33,6 +33,7 @@ pub enum InstructionValue {
     And(Box<InstructionValue>, Box<InstructionValue>),
     Or(Box<InstructionValue>, Box<InstructionValue>),
     In(Box<InstructionValue>, Box<InstructionValue>),
+    Func(u32, Vec<u32>, Vec<u8>),
     True,
     False,
     Null
@@ -60,11 +61,10 @@ impl BytecodeReader {
     pub fn init(&mut self) -> Instruction {
         self.len = self.bytes.len();
         if self.len == 0 { std::process::exit(0) };
-        self.parse_byte()
+        self.parse_byte(self.bytes[self.ci])
     }
 
-    pub fn parse_byte(&mut self) -> Instruction {
-        let op = self.bytes[self.ci];
+    pub fn parse_byte(&mut self, op: u8) -> Instruction {
         self.ci += 1;
         let instruction = match Opcode::from(op) {
             Opcode::Var => Instruction::Var(
@@ -169,6 +169,29 @@ impl BytecodeReader {
             Opcode::Pow => {
                 let (a, b) = self.parse_two_value();
                 InstructionValue::Pow(Box::new(a), Box::new(b))
+            },
+            Opcode::Func => {
+                let name = self.get_len_based_constant_idx();
+                self.ci += 1;
+                let param_len = self.get_byte();
+                self.ci += 1;
+                let mut params = Vec::new();
+                for _ in 0..param_len {
+                    params.push(self.get_len_based_constant_idx());
+                    self.ci += 1;
+                }
+
+                let mut chunk = Vec::new();
+                while self.ci < self.len {
+                    match Opcode::from(self.bytes[self.ci]) {
+                        Opcode::FuncEnd => return InstructionValue::Func(name, params, chunk),
+                        _ => chunk.push(self.bytes[self.ci])
+                    }
+
+                    self.ci += 1;
+                }
+
+                InstructionValue::Func(name, params, chunk)
             },
             Opcode::Call => InstructionValue::Call(
                 {
@@ -276,7 +299,7 @@ impl BytecodeReader {
 
     pub fn next(&mut self) -> Option<Instruction> {
         if (self.ci+1) < self.len {
-            Some(self.parse_byte())
+            Some(self.parse_byte(self.bytes[self.ci]))
         } else {
             None
         }
