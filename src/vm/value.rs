@@ -47,6 +47,9 @@ pub enum Value {
     Dict(HashMap<ValueIndex, (u32, bool)>),
     // TODO(Scientific-Guy): Think a better way for native functions.
     NativeFn(Box<Value>, NativeFn),
+    // Array is used as a value type instead of an object because to prevent unwanted memory of attributes in value register.
+    // TODO(Scientific-Guy): Find a way to make array as an object instead of a value type.
+    Array(Vec<Value>),
     Null
 }
 
@@ -64,7 +67,8 @@ impl Value {
                 Value::Str(_) => "string",
                 Value::Num(_) => "number",
                 Value::NativeFn(_, _) => "function",
-                Value::Dict(_) => "object"
+                Value::Dict(_) => "object",
+                Value::Array(_) => "array"
             }
         )
     }

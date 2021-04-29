@@ -49,6 +49,15 @@ pub fn inspect(val: Value, vm: &mut VM) -> String {
 
             content + "}"
         },
+        Value::Array(vec) => {
+            let mut content = "[\n".to_string();
+
+            for item in vec.iter() {
+                content += format!("    {}", inspect_tiny(item.clone(), vm));
+            }
+
+            content + "]"
+        }
         //_ => "unknown".to_string()
     }
 }
@@ -61,6 +70,7 @@ pub fn inspect_tiny(val: Value, _vm: &mut VM) -> String {
         Value::Null => "null".to_string(),
         Value::NativeFn(_, _) => "[NativeFunction]".to_string(),
         Value::Dict(_) => "[Object]".to_string(),
+        Value::Array(_) => "[Array]".to_string()
         //_ => "unknown".to_string()
     }
 }
