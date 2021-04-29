@@ -47,6 +47,7 @@ pub enum Opcode {
     Or,
     And,
     In,
+    Func,
     Long, // Used to discriminate is the index u32
     Short // Used to discriminate is the index u8
 }
