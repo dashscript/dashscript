@@ -226,10 +226,10 @@ impl VM {
                                 if let Value::Str(str) = this {
                                     match str.parse::<fsize>() {
                                         Ok(num) => result::ok(Value::Num(num), vm),
-                                        Err(e) => result::err(Value::Str(format!("{}", e)), vm)
+                                        Err(_) => result::err(Value::Str("Improper number.".to_string()), vm)
                                     }
                                 } else {
-                                    result::err(Value::Str("Improper number..".to_string()), vm)
+                                    result::err(Value::Str("Improper number.".to_string()), vm)
                                 }
                             }),
                             "startsWith" => Value::NativeFn(Box::new(Value::Str(str)), |this, args, vm| {

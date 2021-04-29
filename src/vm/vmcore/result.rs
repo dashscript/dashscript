@@ -13,8 +13,8 @@ pub fn ok(val: Value, vm: &mut VM) -> Value {
 
 pub fn err(val: Value, vm: &mut VM) -> Value {
     into_value_dict(vec![
-        ("isOk", Value::Boolean(true), false),
-        ("isErr", Value::Boolean(false), false),
+        ("isOk", Value::Boolean(false), false),
+        ("isErr", Value::Boolean(true), false),
         ("unwrapError", Value::NativeFn(Box::new(val), |this, _, _| this), false),
         ("unwrap", Value::to_native_fn(|_, _, vm| panic("UnwrapError: Unwrapping an result when the result is error.".to_string(), vm)), false)
     ], vm)
