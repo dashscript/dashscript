@@ -99,11 +99,10 @@ impl Lexer {
 
     pub fn parse(&mut self) -> Result<(), String> {
         self.len = self.body.len();
-        let mut next_char = Some(&self.chars[self.ci]);
 
-        while next_char.is_some() {
-            let char = *next_char.unwrap();
-
+        while self.ci < self.len {
+            let char = self.chars[self.ci];
+    
             if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || char == '_' {
                 self.ci += 1;
                 let word = self.parse_word(char);
@@ -129,7 +128,6 @@ impl Lexer {
             }
 
             self.ci += 1;
-            next_char = self.chars.get(self.ci);
         }
 
         Ok(())
