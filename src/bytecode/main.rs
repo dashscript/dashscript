@@ -197,7 +197,7 @@ impl BytecodeCompiler {
                 self.load_identifier(ident)
             },
             Identifier::And(a, b) => {
-                self.bytes.push(Opcode::Add as u8);
+                self.bytes.push(Opcode::And as u8);
                 self.load_identifier(a);
                 self.load_identifier(b);
             },
