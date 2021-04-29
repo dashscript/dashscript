@@ -13,6 +13,12 @@ pub struct BytecodeReader {
 }
 
 #[derive(Debug, Clone)]
+pub enum LogicalOperator {
+    GreaterThan,
+    LessThan
+}
+
+#[derive(Debug, Clone)]
 pub enum InstructionValue {
     Str(u32),
     Num(fsize),
@@ -35,6 +41,7 @@ pub enum InstructionValue {
     // TODO(Scientific-Guy): Support for `in` keyword places rather only in for loops.
     In(Box<InstructionValue>, Box<InstructionValue>),
     Func(u32, Vec<u32>, Vec<u8>),
+    Condition(Box<InstructionValue>, LogicalOperator, Box<InstructionValue>),
     True,
     False,
     Null
@@ -296,6 +303,14 @@ impl BytecodeReader {
             Opcode::In => {
                 let (a, b) = self.parse_two_value();
                 InstructionValue::In(Box::new(a), Box::new(b))
+            },
+            Opcode::GreaterThan => {
+                let (a, b) = self.parse_two_value();
+                InstructionValue::Condition(Box::new(a), LogicalOperator::GreaterThan, Box::new(b))
+            },
+            Opcode::LessThan => {
+                let (a, b) = self.parse_two_value();
+                InstructionValue::Condition(Box::new(a), LogicalOperator::LessThan, Box::new(b))
             },
             op => {
                 println!("CompilerError: Dislocated bytes.\n    Detected an unexpected bytecode: {:?}", op);

@@ -43,6 +43,8 @@ pub enum Opcode {
     Func,
     FuncEnd,
     Return,
+    GreaterThan,
+    LessThan,
     Long, // Used to discriminate is the index u32
     Short // Used to discriminate is the index u8
 }
@@ -208,6 +210,16 @@ impl BytecodeCompiler {
             },
             Identifier::In(a, b) => {
                 self.bytes.push(Opcode::In as u8);
+                self.load_identifier(a);
+                self.load_identifier(b);
+            },
+            Identifier::Condition(a, op, b) => {
+                self.bytes.push(match op.as_str() {
+                    ">" => Opcode::GreaterThan,
+                    "<" => Opcode::LessThan,
+                    _ => return
+                } as u8);
+
                 self.load_identifier(a);
                 self.load_identifier(b);
             },

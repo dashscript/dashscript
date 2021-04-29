@@ -1,6 +1,7 @@
 use std::env;
 use std::collections::HashMap;
 use crate::common::fsize;
+use crate::bytecode::reader::LogicalOperator;
 use super::value::{ Value, ValueRegister, ValueIndex };
 use super::vmcore::{ builtin, window, result, memory, into_value_dict, math, date, builtin::inspect };
 use super::vmcore;
@@ -407,6 +408,20 @@ impl VM {
                 self.execute_value(*b, pos)?,
                 self
             )),
+            InstructionValue::Condition(a, LogicalOperator::GreaterThan, b) => Ok({
+                if let (Value::Num(a), Value::Num(b)) = (self.execute_value(*a, pos)?, self.execute_value(*b, pos)?) {
+                    Value::Boolean(a > b)
+                } else {
+                    Value::Boolean(false)
+                }
+            }),
+            InstructionValue::Condition(a, LogicalOperator::LessThan, b) => Ok({
+                if let (Value::Num(a), Value::Num(b)) = (self.execute_value(*a, pos)?, self.execute_value(*b, pos)?) {
+                    Value::Boolean(a > b)
+                } else {
+                    Value::Boolean(false)
+                }
+            }),
             i => Err(self.create_error(
                 format!("UnknownRuntimeError: Unexpected value while rendering: {:?}.", i), 
                 pos
