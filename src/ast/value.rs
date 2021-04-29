@@ -55,6 +55,7 @@ impl AST {
                     self.ci += 1;
                     let next = self.parse_value("dserror(13): Improper arithmetic equation.");
                     self.ci += 1;
+
                     match char.as_str() {
                         "+" => res = Identifier::Add(Box::new(res), Box::new(next)),
                         "-" => res = Identifier::Subtract(Box::new(res), Box::new(next)),
@@ -63,6 +64,8 @@ impl AST {
                         "^" => res = Identifier::Pow(Box::new(res), Box::new(next)),
                         _ => ()
                     }
+
+                    if self.current_token().val == TokenType::Punc(';') { continue }
                 },
                 TokenType::LogicalOperator(op) => {
                     match op.as_str() {

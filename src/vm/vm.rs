@@ -417,7 +417,7 @@ impl VM {
             }),
             InstructionValue::Condition(a, LogicalOperator::LessThan, b) => Ok({
                 if let (Value::Num(a), Value::Num(b)) = (self.execute_value(*a, pos)?, self.execute_value(*b, pos)?) {
-                    Value::Boolean(a > b)
+                    Value::Boolean(a < b)
                 } else {
                     Value::Boolean(false)
                 }
