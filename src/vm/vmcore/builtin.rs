@@ -53,7 +53,7 @@ pub fn inspect(val: Value, vm: &mut VM) -> String {
             let mut content = "[\n".to_string();
 
             for item in vec.iter() {
-                content += format!("    {}", inspect_tiny(vm.value_stack.get(*item as usize).unwrap().clone(), vm));
+                content += format!("    {},\n", inspect_tiny(vm.value_stack.get(*item as usize).unwrap().clone(), vm)).as_str();
             }
 
             content + "]"
