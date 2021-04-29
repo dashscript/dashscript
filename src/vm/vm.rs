@@ -366,6 +366,9 @@ impl VM {
 
                 Ok(val)
             },
+            InstructionValue::Invert(ident) => {
+                Ok(Value::Boolean(!builtin::bool(self.execute_value(*ident, pos)?)))
+            },
             _ => Err(self.create_error(
                 format!("UnknownRuntimeError: Unexpected value while rendering."), 
                 pos
