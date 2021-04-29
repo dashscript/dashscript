@@ -200,10 +200,7 @@ impl AST {
             let token = self.tokens[self.ci].clone();
 
             match &token.val {
-                TokenType::Punc('}') => {
-                    self.ci += 1;
-                    return statements;
-                },
+                TokenType::Punc('}') => return statements,
                 TokenType::Keyword(key) => {
                     let stmt = self.get_keyword_statement(key.to_string(), token.pos);
                     statements.push(stmt);

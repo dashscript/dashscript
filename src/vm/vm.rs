@@ -345,9 +345,14 @@ impl VM {
                     self.execute_value(*falsy_value, pos)?
                 }
             }),
-            InstructionValue::Func(_, _, _) => {
-                println!("{:?}", value);
-                Ok(Value::Null)
+            InstructionValue::Func(id, params, chunk) => {
+                let name = self.reader.get_constant(id as usize);
+                let val = Value::Func(id, params, chunk);
+                if name != "anonymous".to_string() {
+                    self.add_value(name, val.clone(), false)
+                }
+
+                Ok(val)
             },
             _ => Err(self.create_error(
                 format!("UnknownRuntimeError: Unexpected value while rendering."), 

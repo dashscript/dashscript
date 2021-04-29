@@ -91,7 +91,6 @@ impl AST {
         let mut val = self.parse_value("dserror(21): Expected value in a bracket.");
         val = Identifier::Group(Box::new(val));
         self.ci += 1;
-        println!("{:?}", val);
         let close = self.next_token("dserror(10): Detected an unclosed bracket.");
 
         match &close.val {
