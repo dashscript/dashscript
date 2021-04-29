@@ -5,6 +5,14 @@ use crate::common::get_line_col_by_line_data;
 use super::result::{ ok, err };
 use super::into_value_dict;
 
+pub fn bool(val: Value) -> bool {
+    match val {
+        Value::Boolean(false) | Value::Null => false,
+        Value::Num(num) => num == 0.0,
+        _ => true
+    }
+}
+
 pub fn readline(vm: &mut VM) -> Value {
     let mut result = String::new();
     match stdin().read_line(&mut result) {

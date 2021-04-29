@@ -309,6 +309,14 @@ impl VM {
                     ))
                 }
             },
+            InstructionValue::Or(target, falsy_value) => Ok({
+                let target_val = self.execute_value(*target, pos)?;
+                if builtin::bool(target_val.clone()) {
+                    target_val
+                } else {
+                    self.execute_value(*falsy_value, pos)?
+                }
+            }),
             _ => Err(self.create_error(
                 format!("UnknownRuntimeError: Unexpected value while rendering."), 
                 pos
