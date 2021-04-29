@@ -309,6 +309,17 @@ impl VM {
                     ))
                 }
             },
+            InstructionValue::Array(vec) => {
+                let mut items = Vec::new();
+
+                for item in vec {
+                    let val = self.execute_value(item, pos)?;
+                    self.value_stack.push(val);
+                    items.push(self.value_stack.len() as u32 - 1);
+                }
+
+                Ok(Value::Array(items))
+            },
             InstructionValue::Or(target, falsy_value) => Ok({
                 let target_val = self.execute_value(*target, pos)?;
                 if builtin::bool(target_val.clone()) {
