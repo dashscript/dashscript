@@ -23,6 +23,7 @@ impl AST {
         
         let mut cond = self.parse_parenthesis();
         cond = if let Identifier::Group(group) = cond { *group } else { cond };
+        self.ci -= 1;
 
         Statement {
             val: StatementType::While(cond, self.parse_sub_body()),

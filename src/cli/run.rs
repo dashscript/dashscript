@@ -32,6 +32,14 @@ pub fn run(cli: &Command) {
     };
 
     let compiler = BytecodeCompiler::new(AST::new(&cli.args[2], &lexer));
+
+    // Flag for just development purpose to trace back errors.
+    if cli.flags.get("show-bytes").is_some() {
+        println!("Constants = {:?}", compiler.constants);
+        println!("Instructions = {:?}", compiler.bytes);
+        return;
+    }
+
     // println!("{:?}\n{:?}", compiler.bytes, compiler.constants);
 
     match VM::new(

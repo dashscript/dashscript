@@ -56,6 +56,8 @@ pub enum Instruction {
     Var(usize, u32, InstructionValue),
     Assign(usize, InstructionValue, u8, InstructionValue),
     Return(usize, InstructionValue),
+    Break(usize),
+    While(usize, InstructionValue, Vec<u8>),
     Value(usize, InstructionValue)
 }
 
@@ -113,6 +115,27 @@ impl BytecodeReader {
                     self.parse_value(op)
                 }
             ),
+            Opcode::Break => Instruction::Break(self.ci-1),
+            Opcode::While => Instruction::While(self.ci-1, {
+                let op = Opcode::from(self.bytes[self.ci]);
+                self.ci += 1;
+                self.parse_value(op)
+            }, {
+                self.ci += 1;
+                let mut chunk = Vec::new();
+                loop {
+                    if self.ci < self.len {
+                        match Opcode::from(self.bytes[self.ci]) {
+                            Opcode::BodyEnd => break chunk,
+                            _ => chunk.push(self.bytes[self.ci])
+                        }
+    
+                        self.ci += 1;
+                    } else {
+                        break chunk;
+                    }
+                }
+            }),
             opcode => Instruction::Value(self.ci, self.parse_value(opcode))
         };
 
@@ -202,7 +225,7 @@ impl BytecodeReader {
                 let mut chunk = Vec::new();
                 while self.ci < self.len {
                     match Opcode::from(self.bytes[self.ci]) {
-                        Opcode::FuncEnd => return InstructionValue::Func(name, params, chunk),
+                        Opcode::BodyEnd => return InstructionValue::Func(name, params, chunk),
                         _ => chunk.push(self.bytes[self.ci])
                     }
 

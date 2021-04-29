@@ -41,7 +41,7 @@ pub enum Opcode {
     And,
     In,
     Func,
-    FuncEnd,
+    BodyEnd,
     Return,
     GreaterThan,
     GreaterThanOrEqual,
@@ -49,6 +49,8 @@ pub enum Opcode {
     LessThanOrEqual,
     Equal,
     NotEqual,
+    While,
+    Break,
     Long, // Used to discriminate is the index u32
     Short // Used to discriminate is the index u8
 }
@@ -102,6 +104,16 @@ impl BytecodeCompiler {
                 self.load_identifier(ident)
             },
             StatementType::Primary(ident) => self.load_identifier(ident),
+            StatementType::Break => self.bytes.push(Opcode::Break as u8),
+            StatementType::While(ident, stmts) => {
+                self.bytes.push(Opcode::While as u8);
+                self.load_identifier(ident);
+                for stmt in stmts {
+                    self.parse_byte(stmt.clone());
+                }
+
+                self.bytes.push(Opcode::BodyEnd as u8);
+            },
             _ => ()
         }
     }
@@ -188,7 +200,7 @@ impl BytecodeCompiler {
                     i += 1;
                 }
 
-                self.bytes.push(Opcode::FuncEnd as u8);
+                self.bytes.push(Opcode::BodyEnd as u8);
             },
             Identifier::Group(ident) => {
                 self.bytes.push(Opcode::Group as u8);

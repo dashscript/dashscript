@@ -96,10 +96,38 @@ impl VM {
                 self.execute_value(val, pos)?;
                 Ok(())
             },
+            // TODO(Scientific-Guy): Make a better execution for the while loop.
+            Instruction::While(pos, condition, chunk) => {
+                let mut instructions = Vec::new();
+                let mut reader = self.reader.clone();
+                reader.pos_map.clear();
+                reader.ci = 0;
+                reader.len = chunk.len();
+                reader.bytes = chunk.clone();
+                self.current_depth += 1;
+
+                while reader.ci < reader.len {
+                    instructions.push(reader.parse_byte(reader.bytes[reader.ci]));
+                }
+
+                while builtin::bool(self.execute_value(condition.clone(), pos)?) {
+                    for instruction in &instructions {
+                        if let Instruction::Break(_) = instruction {
+                            return Ok(());
+                        } else {
+                            self.execute_instruction(instruction.clone())?;
+                        }
+                    }
+                }
+
+                self.current_depth -= 1;
+                Ok(())
+            },
             Instruction::Return(pos, val) => {
                 println!("{}", builtin::inspect(self.execute_value(val, pos)?, self));
                 std::process::exit(0);
-            }
+            },
+            Instruction::Break(_) => std::process::exit(0)
         }
     }
 
@@ -474,7 +502,7 @@ impl VM {
             );
         }
 
-        while reader.ci < reader.len {
+        loop {
             if (reader.ci+1) < reader.len {
                 match reader.parse_byte(reader.bytes[reader.ci]) {
                     Instruction::Return(pos, val) => return self.execute_value(val, pos),
