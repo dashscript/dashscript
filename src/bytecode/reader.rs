@@ -3,6 +3,25 @@ use crate::common::{ fsize, MAX_BYTES };
 use crate::lexer::parser::Position;
 use super::main::{ BytecodeCompiler, Opcode };
 
+pub struct ChunkReader<'a> {
+    reader: &'a mut BytecodeReader,
+    chunk: Vec<u8>
+}
+
+impl Iterator for ChunkReader<'_> {
+
+    type Item = Instruction;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if (self.reader.ci+1) < self.reader.len {
+            Some(self.reader.parse_byte(self.chunk[self.reader.ci]))
+        } else {
+            None
+        }
+    }
+
+}
+
 #[derive(Debug, Clone)]
 pub struct BytecodeReader {
     pub bytes: Vec<u8>,
@@ -62,6 +81,12 @@ impl BytecodeReader {
         self.len = self.bytes.len();
         if self.len == 0 { std::process::exit(0) };
         self.parse_byte(self.bytes[self.ci])
+    }
+
+    pub fn read_chunk(&mut self, chunk: Vec<u8>) -> ChunkReader {
+        self.len = chunk.len();
+        self.ci = 0;
+        ChunkReader { reader: self, chunk }
     }
 
     pub fn parse_byte(&mut self, op: u8) -> Instruction {
