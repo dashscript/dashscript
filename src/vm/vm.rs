@@ -150,23 +150,25 @@ impl VM {
         match value {
             InstructionValue::Word(i) => {
                 let old_val = self.get_value_register(i)?;
-                match op {
-                    0 => {
-                        if last_stack {
-                            if !old_val.mutable {
-                                return Err(self.create_error(
-                                    format!("AssignmentToConstant: You cannot assign a value to a constant"),
-                                    pos
-                                ))
-                            }
 
-                            self.value_stack[old_val.id as usize] = val;
-                            Ok(0)
-                        } else {
-                            Ok(old_val.id)
-                        }
-                    },
-                    _ => Ok(0)
+                if last_stack {
+                    if !old_val.mutable {
+                        return Err(self.create_error(
+                            format!("AssignmentToConstant: You cannot assign a value to a constant"),
+                            pos
+                        ))
+                    }
+
+                    match op {
+                        0 => self.value_stack[old_val.id as usize] = val,
+                        1 => self.value_stack[old_val.id as usize] = vmcore::add_values(self.value_stack[old_val.id as usize].clone(), val),
+                        2 => self.value_stack[old_val.id as usize] = vmcore::sub_values(self.value_stack[old_val.id as usize].clone(), val, self),
+                        _ => ()
+                    }
+
+                    Ok(0)
+                } else {
+                    Ok(old_val.id)
                 }
             },
             InstructionValue::Attr(raw_target, raw_attr) => {
@@ -185,10 +187,10 @@ impl VM {
                                 }
 
                                 match op {
-                                    0 => {
-                                        self.value_stack[old_val.0 as usize] = val;
-                                    },
-                                    _ => () // Ignore
+                                    0 => self.value_stack[old_val.0 as usize] = val,
+                                    1 => self.value_stack[old_val.0 as usize] = vmcore::add_values(self.value_stack[old_val.0 as usize].clone(), val),
+                                    2 => self.value_stack[old_val.0 as usize] = vmcore::sub_values(self.value_stack[old_val.0 as usize].clone(), val, self),
+                                    _ => ()
                                 }
                             }
 
@@ -196,6 +198,20 @@ impl VM {
                         },
                         None => {
                             if last_stack {
+                                if op == 0 {
+                                    return Err(self.create_error(
+                                        format!(
+                                            "UnexpectedAssignment: You can only assign a value if the previous value is null but you have used a `{}` operator.",
+                                            match op {
+                                                1 => "+=",
+                                                2 => "-=",
+                                                _ => "unknown"
+                                            }
+                                        ), 
+                                        pos
+                                    ))
+                                }
+
                                 self.value_stack.push(val);
                                 entries.insert(attr_index, (self.value_stack.len() as u32 - 1, true));
                                 self.value_stack[target_id as usize] = Value::Dict(entries);
