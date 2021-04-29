@@ -42,6 +42,7 @@ pub enum Opcode {
     In,
     Func,
     FuncEnd,
+    Return,
     Long, // Used to discriminate is the index u32
     Short // Used to discriminate is the index u8
 }
@@ -90,9 +91,11 @@ impl BytecodeCompiler {
                 self.bytes.push(op.clone() as u8);
                 self.load_identifier(val);
             },
-            StatementType::Primary(ident) => {
-                self.load_identifier(ident);
-            }
+            StatementType::Return(ident) => {
+                self.bytes.push(Opcode::Return as u8);
+                self.load_identifier(ident)
+            },
+            StatementType::Primary(ident) => self.load_identifier(ident),
             _ => ()
         }
     }

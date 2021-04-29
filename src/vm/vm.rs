@@ -70,27 +70,38 @@ impl VM {
         self.current_depth += 1;
 
         while instruction.is_some() {
-            match instruction.unwrap() {
-                Instruction::Var(pos, name, value) => {
-                    let name = self.reader.get_constant(name as usize);
-                    let value = self.execute_value(value, pos)?;
-                    self.add_value(name, value, true);
-                },
-                Instruction::Assign(pos, target, op, value) => {
-                    let val = self.execute_value(value, pos)?;
-                    self.execute_assignment(target, pos, val, op, true, 0)?;
-                },
-                Instruction::Value(pos, val) => {
-                    self.execute_value(val, pos)?;
-                }
-            }
-
+            self.execute_instruction(instruction.unwrap())?;
             instruction = self.reader.next();
         }
         
         Ok(())
     }
 
+    pub fn execute_instruction(&mut self, instruction: Instruction) -> Result<(), RuntimeError> {
+        match instruction {
+            Instruction::Var(pos, name, value) => {
+                let name = self.reader.get_constant(name as usize);
+                let value = self.execute_value(value, pos)?;
+                self.add_value(name, value, true);
+                Ok(())
+            },
+            Instruction::Assign(pos, target, op, value) => {
+                let val = self.execute_value(value, pos)?;
+                self.execute_assignment(target, pos, val, op, true, 0)?;
+                Ok(())
+            },
+            Instruction::Value(pos, val) => {
+                self.execute_value(val, pos)?;
+                Ok(())
+            },
+            Instruction::Return(pos, val) => {
+                println!("{}", builtin::inspect(self.execute_value(val, pos)?, self));
+                std::process::exit(0);
+            }
+        }
+    }
+
+    // TODO(Scientific-Guy): Make a better assignment executor.
     pub fn execute_assignment(
         &mut self, 
         value: InstructionValue, 
@@ -320,6 +331,7 @@ impl VM {
                         self.call_stack.pop();
                         res
                     },
+                    Value::Func(id, params, chunk) => self.execute_func(id, params, call_params, chunk),
                     _ => Err(self.create_error(
                         format!("UnexpectedTypeError: Type {} is not callable.", call_body.type_as_str()), 
                         pos
@@ -359,6 +371,53 @@ impl VM {
                 pos
             ))
         }
+    }
+
+    pub fn execute_func(
+        &mut self,
+        id: u32,
+        param_ids: Vec<u32>,
+        params: Vec<Value>,
+        chunk: Vec<u8>
+    ) -> Result<Value, RuntimeError> {
+        self.call_stack.push(self.reader.get_constant(id as usize));
+        self.current_depth += 1;
+
+        // TODO(Scientific-Guy): Make a better chunk reader instead of cloning the reader.
+        let mut reader = self.reader.clone();
+        // Cleaning to prevent unwanted cache.
+        reader.pos_map.clear();
+        reader.len = chunk.len();
+        reader.ci = 0;
+        reader.bytes = chunk;
+
+        for i in 0..param_ids.len() {
+            self.add_value(
+                self.reader.get_constant(param_ids[i] as usize),
+                match params.get(i as usize) {
+                    Some(val) => val.clone(),
+                    None => Value::Null
+                },
+                true
+            );
+        }
+
+        while reader.ci < reader.len {
+            if (reader.ci+1) < reader.len {
+                match reader.parse_byte(reader.bytes[reader.ci]) {
+                    Instruction::Return(pos, val) => return self.execute_value(val, pos),
+                    instruction => {
+                        self.execute_instruction(instruction)?;
+                    }
+                }
+            } else {
+                break
+            }
+        }
+
+        self.call_stack.pop();
+        self.current_depth -= 1;
+        Ok(Value::Null)
     }
 
     pub fn add_value(&mut self, name: String, val: Value, mutable: bool) {
