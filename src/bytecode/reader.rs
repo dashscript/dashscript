@@ -15,7 +15,11 @@ pub struct BytecodeReader {
 #[derive(Debug, Clone)]
 pub enum LogicalOperator {
     GreaterThan,
-    LessThan
+    GreaterThanOrEqual,
+    LessThan,
+    LessThanOrEqual,
+    Equal,
+    NotEqual,
 }
 
 #[derive(Debug, Clone)]
@@ -311,6 +315,22 @@ impl BytecodeReader {
             Opcode::LessThan => {
                 let (a, b) = self.parse_two_value();
                 InstructionValue::Condition(Box::new(a), LogicalOperator::LessThan, Box::new(b))
+            },
+            Opcode::GreaterThanOrEqual => {
+                let (a, b) = self.parse_two_value();
+                InstructionValue::Condition(Box::new(a), LogicalOperator::GreaterThanOrEqual, Box::new(b))
+            },
+            Opcode::LessThanOrEqual => {
+                let (a, b) = self.parse_two_value();
+                InstructionValue::Condition(Box::new(a), LogicalOperator::LessThanOrEqual, Box::new(b))
+            },
+            Opcode::Equal => {
+                let (a, b) = self.parse_two_value();
+                InstructionValue::Condition(Box::new(a), LogicalOperator::Equal, Box::new(b))
+            },
+            Opcode::NotEqual => {
+                let (a, b) = self.parse_two_value();
+                InstructionValue::Condition(Box::new(a), LogicalOperator::NotEqual, Box::new(b))
             },
             op => {
                 println!("CompilerError: Dislocated bytes.\n    Detected an unexpected bytecode: {:?}", op);

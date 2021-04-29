@@ -422,6 +422,22 @@ impl VM {
                     Value::Boolean(false)
                 }
             }),
+            InstructionValue::Condition(a, LogicalOperator::GreaterThanOrEqual, b) => Ok({
+                if let (Value::Num(a), Value::Num(b)) = (self.execute_value(*a, pos)?, self.execute_value(*b, pos)?) {
+                    Value::Boolean(a >= b)
+                } else {
+                    Value::Boolean(false)
+                }
+            }),
+            InstructionValue::Condition(a, LogicalOperator::LessThanOrEqual, b) => Ok({
+                if let (Value::Num(a), Value::Num(b)) = (self.execute_value(*a, pos)?, self.execute_value(*b, pos)?) {
+                    Value::Boolean(a <= b)
+                } else {
+                    Value::Boolean(false)
+                }
+            }),
+            InstructionValue::Condition(a, LogicalOperator::Equal, b) => Ok(Value::Boolean(self.execute_value(*a, pos)? == self.execute_value(*b, pos)?)),
+            InstructionValue::Condition(a, LogicalOperator::NotEqual, b) => Ok(Value::Boolean(self.execute_value(*a, pos)? != self.execute_value(*b, pos)?)),
             i => Err(self.create_error(
                 format!("UnknownRuntimeError: Unexpected value while rendering: {:?}.", i), 
                 pos

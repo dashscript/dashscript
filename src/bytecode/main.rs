@@ -44,7 +44,11 @@ pub enum Opcode {
     FuncEnd,
     Return,
     GreaterThan,
+    GreaterThanOrEqual,
     LessThan,
+    LessThanOrEqual,
+    Equal,
+    NotEqual,
     Long, // Used to discriminate is the index u32
     Short // Used to discriminate is the index u8
 }
@@ -217,6 +221,10 @@ impl BytecodeCompiler {
                 self.bytes.push(match op.as_str() {
                     ">" => Opcode::GreaterThan,
                     "<" => Opcode::LessThan,
+                    "==" => Opcode::Equal,
+                    "!=" => Opcode::NotEqual,
+                    ">=" => Opcode::GreaterThanOrEqual,
+                    "<=" => Opcode::LessThanOrEqual,
                     _ => return
                 } as u8);
 
