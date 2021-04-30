@@ -31,7 +31,13 @@ pub fn run(cli: &Command) {
         }
     };
 
-    let compiler = BytecodeCompiler::new(AST::new(&cli.args[2], &lexer));
+    let compiler = BytecodeCompiler::new(match AST::new(&cli.args[2], &lexer) {
+        Ok(ast) => ast,
+        Err(err) => {
+            println!("{}", err);
+            std::process::exit(0);
+        }
+    });
 
     // Flag for just development purpose to trace back errors.
     if cli.flags.get("show-bytes").is_some() {

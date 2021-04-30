@@ -1,13 +1,7 @@
+use std::fmt;
 use super::types::Statement;
-use crate::{
-    common::get_line_col_by_body,
-    lexer::parser::{
-        Token,
-        TokenType,
-        Position,
-        Lexer
-    }
-};
+use crate::common::get_line_col_by_body;
+use crate::lexer::parser::{ Token, TokenType, Position, Lexer };
 
 #[derive(Debug, Clone)]
 pub struct AST {
@@ -21,7 +15,7 @@ pub struct AST {
 
 impl AST {
 
-    pub fn new(filename: &String, lexer: &Lexer) -> AST {
+    pub fn new(filename: &String, lexer: &Lexer) -> Result<AST, ASTError> {
         let this = &mut AST { 
             filename: filename.clone(), 
             statements: Vec::new(),
@@ -31,14 +25,13 @@ impl AST {
             len: 0
         };
 
-        this.parse_body();
+        this.parse_body()?;
         // println!("\nStatements:\n");
         // for i in this.statements.iter() { println!("{:#?}", i); }
-
-        this.clone()
+        Ok(this.clone())
     }
 
-    pub fn parse_body(&mut self) {
+    pub fn parse_body(&mut self) -> Result<(), ASTError> {
         self.len = self.tokens.len();
 
         while self.ci < self.len {
@@ -46,34 +39,32 @@ impl AST {
 
             match &token.val {
                 TokenType::Keyword(key) => {
-                    let stmt = self.get_keyword_statement(key.to_string(), token.pos);
+                    let stmt = self.get_keyword_statement(key.to_string(), token.pos)?;
                     self.statements.push(stmt);
                 },
                 TokenType::Word(word) => {
                     self.ci += 1;
-                    let stmt = self.get_word_statement(word.to_string(), token.pos);
+                    let stmt = self.get_word_statement(word.to_string(), token.pos)?;
                     self.statements.push(stmt);
                 },
                 TokenType::Punc(';') => (),
                 _ => {
-                    let stmt = self.parse_value_as_stmt();
+                    let stmt = self.get_value_as_stmt()?;
                     self.statements.push(stmt);
                 }
             }
 
             self.ci += 1;
         }
+
+        Ok(())
     }
 
-    pub fn next_token(&mut self, err: &str) -> Token {
+    pub fn next_token(&mut self, err: &str) -> Result<Token, ASTError> {
         self.ci += 1;
-
         match self.tokens.get(self.ci) {
-            Some(t) => t.clone(),
-            None => {
-                self.throw_error(self.tokens[self.ci - 2].pos, err);
-                Token::default()
-            }
+            Some(t) => Ok(t.clone()),
+            None => Err(self.create_error(self.tokens[self.ci - 2].pos, err))
         }
     }
 
@@ -81,16 +72,31 @@ impl AST {
         self.tokens[self.ci].clone()
     }
 
-    pub fn has_next(&self) -> bool {
-        self.ci+1 < self.len
-    }
-
-    pub fn throw_error(&self, pos: Position, reason: &str) {
+    pub fn create_error(&self, pos: Position, reason: &str) -> ASTError {
         let (line, col) = get_line_col_by_body(self.body.clone(), pos.start);
-        let pref: String = format!("    {}:{}:{} -> ", self.filename, line, col);
         let body = self.body[pos.start as usize - 1..pos.end as usize].to_string();
-        println!("SyntaxError: {}\n{}{}\n{}{}", reason, pref, body, " ".repeat(pref.len()), "^".repeat(body.len()));
-        std::process::exit(0);
+        ASTError {
+            line,
+            col,
+            filename: self.filename.clone(),
+            body,
+            reason: reason.to_string()
+        }
     }
 
+}
+
+pub struct ASTError {
+    pub line: usize,
+    pub col: usize,
+    pub filename: String,
+    pub body: String,
+    pub reason: String
+}
+
+impl fmt::Display for ASTError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let pref: String = format!("    {}:{}:{} -> ", self.filename, self.line, self.col);
+        write!(f, "SyntaxError: {}\n{}{}\n{}{}", self.reason, pref, self.body, " ".repeat(pref.len()), "^".repeat(self.body.len()))
+    }
 }
