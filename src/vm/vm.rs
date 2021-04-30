@@ -119,6 +119,23 @@ impl VM {
                 self.execute_value(val, pos)?;
                 Ok(())
             },
+            Instruction::Condition(pos, main_chain, else_chunk) => {
+                for (instruction_value, chunk) in main_chain {
+                    if builtin::bool(self.execute_value(instruction_value, pos)?) {
+                        let mut reader = self.reader.clone();
+                        reader.pos_map.clear();
+                        reader.ci = 0;
+                        reader.len = chunk.len();
+                        reader.bytes = chunk.clone();
+                        self.current_depth += 1;
+
+                        self.current_depth -= 1;
+                        return Ok(());
+                    }
+                }
+
+                Ok(())
+            },
             // TODO(Scientific-Guy): Make a better execution for the while loop.
             Instruction::While(pos, condition, chunk) => {
                 let mut instructions = Vec::new();
