@@ -126,8 +126,6 @@ impl AST {
         // TODO(Scientific-Guy): Instead of getting the parenthesis and dereferring it, make a conditon based parenthessis parser.
         let mut cond = self.get_parenthesis()?;
         cond = if let Identifier::Group(group) = cond { *group } else { cond };
-
-        self.ci -= 1;
         Ok((cond, self.get_sub_body()?))
     }
 
