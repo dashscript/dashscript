@@ -51,6 +51,7 @@ pub enum Opcode {
     NotEqual,
     While,
     Break,
+    Condition,
     Long, // Used to discriminate is the index u32
     Short // Used to discriminate is the index u8
 }
@@ -113,6 +114,26 @@ impl BytecodeCompiler {
                 }
 
                 self.bytes.push(Opcode::BodyEnd as u8);
+            },
+            StatementType::Condition(main_chain, else_chain) => {
+                self.bytes.extend_from_slice(&[Opcode::Condition as u8, main_chain.len() as u8]);
+                for (chain, stmts) in main_chain {
+                    self.load_identifier(chain);
+                    for stmt in stmts {
+                        self.parse_byte(stmt.clone());
+                    }
+
+                    self.bytes.push(Opcode::BodyEnd as u8);
+                }
+
+                if else_chain.is_some() {
+                    self.bytes.push(1);
+                    for stmt in else_chain.clone().unwrap() {
+                        self.parse_byte(stmt);
+                    }
+                } else {
+                    self.bytes.push(0);
+                }
             },
             _ => ()
         }
