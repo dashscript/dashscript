@@ -30,8 +30,7 @@ pub fn inspect(val: Value, vm: &mut VM) -> String {
         Value::Num(num) => num.to_string(),
         Value::Boolean(bool) => bool.to_string(),
         Value::Null => "null".to_string(),
-        Value::NativeFn(_, _) => "[NativeFunction]".to_string(),
-        Value::Func(_, _, _, _) => "[Function]".to_string(),
+        Value::Func(_, _, _, _) | Value::NativeFn(_, _) => "[Function]".to_string(),
         Value::Dict(dict) => {
             let mut content = "{\n".to_string();
 
@@ -69,10 +68,9 @@ pub fn inspect_tiny(val: Value) -> String {
         Value::Num(num) => num.to_string(),
         Value::Boolean(bool) => bool.to_string(),
         Value::Null => "null".to_string(),
-        Value::NativeFn(_, _) => "[NativeFunction]".to_string(),
         Value::Dict(_) => "[Object]".to_string(),
         Value::Array(_) => "[Array]".to_string(),
-        Value::Func(_, _, _, _) => "[Function]".to_string()
+        Value::Func(_, _, _, _) | Value::NativeFn(_, _)  => "[Function]".to_string()
         //_ => "unknown".to_string()
     }
 }
@@ -80,8 +78,8 @@ pub fn inspect_tiny(val: Value) -> String {
 pub fn panic(message: String, vm: &mut VM) -> ! {
     let mut address = String::new();
 
-    for frame in vm.call_stack.clone() {
-        address += &format!("    at {}", frame).to_string();
+    for frame in vm.call_stack.clone().into_iter().rev() {
+        address += &format!("    at {}\n", frame).to_string();
     }
 
     let (line, col) = get_line_col_by_line_data(vm.body_line_data.clone(), vm.reader.ci);
