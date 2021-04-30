@@ -131,6 +131,7 @@ impl AST {
 
     pub fn get_condition_chain(&mut self, pos: Position) -> Result<Statement, ASTError> {
         let mut conditions: Vec<(Identifier, Vec<Statement>)> = vec![self.get_partial_condition()?];
+        self.ci += 1;
         
         // Code warning:
         // self.ci += 1; at the of the loop.
@@ -151,12 +152,11 @@ impl AST {
                 },
                 _ => break
             }
+
+            self.ci += 1;
         }
 
-        Ok(Statement {
-            val: StatementType::Condition(conditions, None),
-            pos
-        })
+        Ok(Statement { val: StatementType::Condition(conditions, None), pos })
     }
 
     pub fn get_function_params(&mut self) -> Result<Vec<String>, ASTError> {
