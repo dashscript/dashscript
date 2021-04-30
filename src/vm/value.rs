@@ -50,7 +50,7 @@ pub enum Value {
     // Array is used as a value type instead of an object because to prevent unwanted memory of attributes in value register.
     // TODO(Scientific-Guy): Find a way to make array as an object instead of a value type.
     Array(Vec<u32>),
-    Func(u32, Vec<u32>, Vec<u8>),
+    Func(u32, Vec<u32>, Vec<u8>, bool),
     Null
 }
 
@@ -60,7 +60,7 @@ impl PartialEq for Value {
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::Num(a), Value::Num(b)) => a == b,
             (Value::Boolean(a), Value::Boolean(b)) => a == b,
-            (Value::Func(_, _, a), Value::Func(_, _, b)) => a == b,
+            (Value::Func(_, _, a, _), Value::Func(_, _, b, _)) => a == b,
             (Value::NativeFn(_, a), Value::NativeFn(_, b)) => a as *const NativeFn == b as *const NativeFn,
             (Value::Dict(a), Value::Dict(b)) => a == b,
             (Value::Null, Value::Null) => true,
@@ -84,7 +84,7 @@ impl Value {
                 Value::Null => "null",
                 Value::Str(_) => "string",
                 Value::Num(_) => "number",
-                Value::NativeFn(_, _) | Value::Func(_, _, _) => "function",
+                Value::NativeFn(_, _) | Value::Func(_, _, _, _) => "function",
                 Value::Dict(_) => "object",
                 Value::Array(_) => "array"
             }

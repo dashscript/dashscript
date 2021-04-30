@@ -190,6 +190,22 @@ impl BytecodeCompiler {
             },
             Identifier::Func(name, params, stmts) => {
                 self.bytes.push(Opcode::Func as u8);
+                self.bytes.push(0);
+                self.push_constant_without_op(name);
+                self.bytes.push(params.len() as u8);
+                for param in params { self.push_constant_without_op(param) };
+                
+                let mut i = 0;
+                while i < stmts.len() {
+                    self.parse_byte(stmts[i].clone());
+                    i += 1;
+                }
+
+                self.bytes.push(Opcode::BodyEnd as u8);
+            },
+            Identifier::AsyncFunc(name, params, stmts) => {
+                self.bytes.push(Opcode::Func as u8);
+                self.bytes.push(1);
                 self.push_constant_without_op(name);
                 self.bytes.push(params.len() as u8);
                 for param in params { self.push_constant_without_op(param) };
@@ -243,7 +259,7 @@ impl BytecodeCompiler {
                 self.load_identifier(a);
                 self.load_identifier(b);
             },
-            _ => ()
+            // _ => ()
         }
     }
 

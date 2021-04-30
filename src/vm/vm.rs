@@ -270,7 +270,7 @@ impl VM {
                     },
                     Value::Str(str) => match attr {
                         ValueIndex::Str(attr) => Ok(match attr.as_str() {
-                            "length" => Value::Num(str.len() as fsize),
+                            "length" => Value::Num(str.chars().count() as fsize),
                             "toLowerCase" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, _| {
                                 if let Value::Str(str) = this {
                                     Value::Str(str.to_lowercase())
@@ -383,7 +383,7 @@ impl VM {
                         self.call_stack.pop();
                         res
                     },
-                    Value::Func(id, params, chunk) => self.execute_func(id, params, call_params, chunk),
+                    Value::Func(id, params, chunk, _) => self.execute_func(id, params, call_params, chunk),
                     _ => Err(self.create_error(
                         format!("UnexpectedTypeError: Type {} is not callable.", call_body.type_as_str()), 
                         pos
@@ -409,9 +409,9 @@ impl VM {
                     self.execute_value(*falsy_value, pos)?
                 }
             }),
-            InstructionValue::Func(id, params, chunk) => {
+            InstructionValue::Func(id, params, chunk, is_async) => {
                 let name = self.reader.get_constant(id as usize);
-                let val = Value::Func(id, params, chunk);
+                let val = Value::Func(id, params, chunk, is_async);
                 if name != "anonymous".to_string() {
                     self.add_value(name, val.clone(), false)
                 }

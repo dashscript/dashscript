@@ -44,7 +44,7 @@ pub enum InstructionValue {
     Or(Box<InstructionValue>, Box<InstructionValue>),
     // TODO(Scientific-Guy): Support for `in` keyword places rather only in for loops.
     In(Box<InstructionValue>, Box<InstructionValue>),
-    Func(u32, Vec<u32>, Vec<u8>),
+    Func(u32, Vec<u32>, Vec<u8>, bool),
     Condition(Box<InstructionValue>, LogicalOperator, Box<InstructionValue>),
     True,
     False,
@@ -223,6 +223,8 @@ impl BytecodeReader {
                 InstructionValue::Pow(Box::new(a), Box::new(b))
             },
             Opcode::Func => {
+                let is_async = self.get_byte_as_bool();
+                self.ci += 1;
                 let name = self.get_len_based_constant_idx();
                 self.ci += 1;
                 let param_len = self.get_byte();
@@ -236,14 +238,14 @@ impl BytecodeReader {
                 let mut chunk = Vec::new();
                 while self.ci < self.len {
                     match Opcode::from(self.bytes[self.ci]) {
-                        Opcode::BodyEnd => return InstructionValue::Func(name, params, chunk),
+                        Opcode::BodyEnd => return InstructionValue::Func(name, params, chunk, is_async),
                         _ => chunk.push(self.bytes[self.ci])
                     }
 
                     self.ci += 1;
                 }
 
-                InstructionValue::Func(name, params, chunk)
+                InstructionValue::Func(name, params, chunk, is_async)
             },
             Opcode::Call => InstructionValue::Call(
                 {
@@ -403,6 +405,10 @@ impl BytecodeReader {
                 std::process::exit(0);
             }
         }
+    }
+
+    pub fn get_byte_as_bool(&mut self) -> bool {
+        self.get_byte() == 1
     }
 
     pub fn get_u32(&mut self) -> u32 {
