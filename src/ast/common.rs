@@ -1,108 +1,93 @@
-use crate::lexer::parser::{ Position, TokenType, AssignmentOp };
-use super::{
-    main::AST,
-    types::{
-        Identifier,
-        Statement,
-        StatementType
-    }
-};
+use crate::lexer::parser::{ Position, TokenType, AssignmentOp, Token };
+use super::main::{ AST, ASTError };
+use super::types::{ Identifier, Statement, StatementType };
 
 impl AST {
 
-    pub fn get_keyword_statement(&mut self, name: String, pos: Position) -> Statement {
+    pub fn get_keyword_statement(&mut self, name: String, pos: Position) -> Result<Statement, ASTError> {
         match name.as_str() {
-            "var" => self.get_decl_statement(pos, false),
-            "const" => self.get_decl_statement(pos, true),
-            "return" => Statement {
-                val: StatementType::Return(match self.next_token("dserror(22): Illegal return statement.").val {
-                    TokenType::Punc(';') => Identifier::Null,
-                    _ => self.parse_value("dserror(22): Illegal return statement.")
+            "var" => self.get_declaration_statement(pos, false),
+            "const" => self.get_declaration_statement(pos, true),
+
+            // TODO(Scientific-Guy): Make a better return statement. (Least likely).
+            "return" => Ok(Statement {
+                val: StatementType::Return({
+                    self.ci += 1;
+                    match self.tokens.get(self.ci) {
+                        Some(Token {
+                            val: TokenType::Punc(';'),
+                            pos: _
+                        }) => Identifier::Null,
+                        _ => self.get_value("dserror(22): Illegal return statement.")?
+                    }
                 }),
                 pos
+            }),
+
+            // TODO(Scientific-Guy): Make a better await handeler but i feel its not necessary.
+            "await" => {
+                self.ci += 1;
+                Ok(Statement {
+                    val: StatementType::Primary(Identifier::Await(
+                        Box::new(self.get_value("dserror(32): Expected a value to await.")?)
+                    )),
+                    pos
+                })
             },
-            "func" => self.parse_function(pos),
-            "if" => self.parse_condition_chain(pos),
-            "async" => self.parse_async_function(pos),
-            "await" => Statement {
-                val: StatementType::Primary(self.get_await_keyword()),
-                pos
-            },
-            "break" => Statement {
-                val: StatementType::Break,
-                pos
-            },
-            "while" => self.parse_while_loop(pos),
-            "continue" => Statement {
-                val: StatementType::Continue,
-                pos
-            },
-            "class" => self.parse_class(pos),
-            "for" => self.parse_for_loop(pos),
-            _ => {
-                self.throw_error(pos, "dserror(14): Unexpected Identifier");
-                Statement::default()
-            }
+
+            "func" => self.get_function_statement(pos),
+            "async" => self.get_async_function_statement(pos),
+            "if" => self.get_condition_chain(pos),
+            "break" => Ok(Statement { val: StatementType::Break, pos }),
+            "while" => self.get_while_loop(pos),
+            "continue" => Ok(Statement { val: StatementType::Continue, pos }),
+            "class" => self.get_class_statement(pos),
+            "for" => self.get_for_loop(pos),
+            _ => Err(self.create_error(pos, "dserror(14): Unexpected Identifier"))
         }
     }
 
-    pub fn get_decl_statement(&mut self, pos: Position, is_const: bool) -> Statement {
-        Statement {
+    pub fn get_declaration_statement(&mut self, pos: Position, is_const: bool) -> Result<Statement, ASTError> {
+        Ok(Statement {
             val: StatementType::Var(
-                self.next_word_as_str("dserror(3): Expected a declaration name but found nothing."),
+                self.next_word_as_str("dserror(3): Expected a declaration name but found nothing.")?,
                 {
-                    let token = self.next_token("dserror(4): Expected an assignment operator but found nothing.");
                     self.ci += 1;
-                    match &token.val {
-                        TokenType::AssignmentOperator(AssignmentOp::Assign) => (),
-                        _ => self.throw_error(self.tokens[self.ci - 1].pos, "dserror(4): Expected an assignment operator but found nothing.")
-                    };
+                    match self.tokens.get(self.ci) {
+                        Some(Token {
+                            val: TokenType::AssignmentOperator(AssignmentOp::Assign),
+                            pos: _
+                        }) => self.ci += 1,
+                        _ => return Err(self.create_error(self.tokens[self.ci - 2].pos, "dserror(4): Expected an assignment operator but found nothing."))
+                    }
 
-                    self.parse_value("dserror(7): Expected an value before termination of the statement.")
+                    self.get_value("dserror(7): Expected an value before termination of the statement.")?
                 },
                 is_const
             ),
             pos
-        }
+        })
     }
-
-    pub fn get_await_keyword(&mut self) -> Identifier {
-        self.ci += 1;
-        Identifier::Await(
-            Box::new(self.parse_value("dserror(32): Expected a value to await."))
-        )
-    }
-
-    pub fn next_assignment_operator(&mut self, err: &str) -> AssignmentOp {
-        let token = self.next_token(err);
-        self.ci += 1;
-        match &token.val {
-            TokenType::AssignmentOperator(op) => op.clone(),
-            _ => {
-                self.throw_error(self.tokens[self.ci - 1].pos, err);
-                AssignmentOp::Assign
-            }
-        }
-    }
-
     
-    pub fn parse_parenthesis(&mut self) -> Identifier {
+    pub fn get_parenthesis(&mut self) -> Result<Identifier, ASTError> {
         self.ci += 1;
-        let mut val = self.parse_value("dserror(21): Expected value in a bracket.");
+        let mut val = self.get_value("dserror(21): Expected value in a bracket.")?;
         val = Identifier::Group(Box::new(val));
-        self.ci += 1;
-        let close = self.next_token("dserror(10): Detected an unclosed bracket.");
 
-        match &close.val {
-            TokenType::Punc(')') => (),
-            _ => self.throw_error(close.pos, "dserror(10): Detected an unclosed bracket.")
+        self.ci += 2;
+        match self.tokens.get(self.ci) {
+            Some(Token {
+                val: TokenType::Punc(')'),
+                pos: _
+            }) => (),
+            _ => return Err(self.create_error(self.tokens[self.ci - 2].pos, "dserror(10): Detected an unclosed bracket."))
         }
 
         self.ci += 1;
-        self.parse_word_as_identifier(val)
+        self.get_identifier_as_word(val)
     }
 
-    pub fn parse_array(&mut self) -> Identifier {
+    pub fn get_array(&mut self) -> Result<Identifier, ASTError> {
         let mut items: Vec<Identifier> = Vec::new();
         let mut sep_used = false;
 
@@ -112,11 +97,11 @@ impl AST {
             match &token.val {
                 TokenType::Punc(']') => {
                     self.ci += 1;
-                    return self.parse_word_as_identifier(Identifier::Array(items))
+                    return self.get_identifier_as_word(Identifier::Array(items))
                 },
                 TokenType::Punc(',') if sep_used => sep_used = false,
                 _ => {
-                    items.push(self.parse_value("dserror(10): Detected an unclosed bracket."));
+                    items.push(self.get_value("dserror(10): Detected an unclosed bracket.")?);
                     sep_used = true;
                     self.ci += 1;
                 }
@@ -125,68 +110,65 @@ impl AST {
             self.ci += 1;
         }
 
-        self.throw_error(self.tokens[self.ci - 1].pos, "dserror(10): Detected an unclosed bracket.");
-        Identifier::default()
+        Err(self.create_error(self.tokens[self.ci - 1].pos, "dserror(10): Detected an unclosed bracket."))
     }
 
-    pub fn parse_partial_condition(&mut self) -> (Identifier, Vec<Statement>) {
-        match self.next_token("dserror(26): Expected an open bracket.").val {
-            TokenType::Punc('(') => (),
-            _ => self.throw_error(self.current_token().pos, "dserror(26): Expected an open bracket.")
+    pub fn get_partial_condition(&mut self) -> Result<(Identifier, Vec<Statement>), ASTError> {
+        self.ci += 1;
+        match self.tokens.get(self.ci) {
+            Some(Token {
+                val: TokenType::Punc('('),
+                pos: _
+            }) => (),
+            _ => return Err(self.create_error(self.current_token().pos, "dserror(26): Expected an open bracket."))
         }
-        
-        let mut cond = self.parse_parenthesis();
+
+        // TODO(Scientific-Guy): Instead of getting the parenthesis and dereferring it, make a conditon based parenthessis parser.
+        let mut cond = self.get_parenthesis()?;
         cond = if let Identifier::Group(group) = cond { *group } else { cond };
+
         self.ci -= 1;
-        let body = self.parse_sub_body();
-        (cond, body)
+        Ok((cond, self.get_sub_body()?))
     }
 
-    pub fn parse_condition_chain(&mut self, pos: Position) -> Statement {
-        let mut conditions: Vec<(Identifier, Vec<Statement>)> = vec![self.parse_partial_condition()];
+    pub fn get_condition_chain(&mut self, pos: Position) -> Result<Statement, ASTError> {
+        let mut conditions: Vec<(Identifier, Vec<Statement>)> = vec![self.get_partial_condition()?];
         
+        // Code warning:
+        // self.ci += 1; at the of the loop.
+        // self.ci -= 1; at the start of the loop.
         while self.ci < self.len {
             let token = self.tokens[self.ci].clone();
 
             match &token.val {
-                TokenType::Keyword(word) => match word.as_str() {
-                    "elif" => {
-                        self.ci -= 1;
-                        conditions.push(self.parse_partial_condition());
-                    },
-                    "else" => {
-                        self.ci -= 1;
-                        let stmt = Statement {
-                            val: StatementType::Condition(conditions, Some(self.parse_sub_body())),
+                TokenType::Keyword(word) => {
+                    match word.as_str() {
+                        "elif" => conditions.push(self.get_partial_condition()?),
+                        "else" => return Ok(Statement {
+                            val: StatementType::Condition(conditions, Some(self.get_sub_body()?)),
                             pos
-                        };
-
-                        return stmt;
-                    },
-                    _ => {
-                        self.ci -= 1;
-                        break;
+                        }),
+                        _ => break
                     }
                 },
-                _ => {
-                    self.ci -= 1;
-                    break;
-                }
+                _ => break
             }
-
-            self.ci += 1;
         }
 
-        Statement {
+        Ok(Statement {
             val: StatementType::Condition(conditions, None),
             pos
-        }
+        })
     }
 
-    pub fn parse_function_params(&mut self) -> Vec<String> {
-        match self.next_token("dserror(23): Missing parameters initialization for function.").val {
-            TokenType::Punc('(') => self.ci += 1,
-            _ => self.throw_error(self.tokens[self.ci].pos, "dserror(23): Missing parameters initialization for function.")
+    pub fn get_function_params(&mut self) -> Result<Vec<String>, ASTError> {
+        self.ci += 1;
+        match self.tokens.get(self.ci) {
+            Some(Token {
+                val: TokenType::Punc('('),
+                pos: _
+            }) => self.ci += 1,
+            _ => return Err(self.create_error(self.tokens[self.ci].pos, "dserror(23): Missing parameters initialization for function."))
         }
         
         let mut params: Vec<String> = Vec::new();
@@ -196,83 +178,110 @@ impl AST {
             let token = self.tokens[self.ci].clone();
 
             match &token.val {
-                TokenType::Punc(',') if sep_used => (),
+                TokenType::Punc(',') if sep_used => sep_used = false,
                 TokenType::Punc(')') => {
-                    if params.len() >= 255 { self.throw_error(token.pos, "dserror(38) A function can have upto 254 parameters only.") }
-                    self.ci -= 1;
-                    return params
+                    return if params.len() >= 255 {
+                        Err(self.create_error(token.pos, "dserror(38) A function can have upto 254 parameters only."))
+                    } else {
+                        self.ci -= 1;
+                        Ok(params)
+                    }
                 },
-                TokenType::Word(name) => params.push(name.to_string()),
-                _ => {
-                    self.throw_error(token.pos, "dserror(14): Unexpected identifier.");
-                    sep_used = true
-                }
+                TokenType::Word(name) => {
+                    params.push(name.to_string());
+                    sep_used = true;
+                },
+                _ => return Err(self.create_error(token.pos, "dserror(14): Unexpected identifier."))
             }
 
             self.ci += 1;
         }
 
-        self.throw_error(self.tokens[self.ci - 1].pos, "dserror(23): Missing parameters initialization for function.");
-        params
+        return Err(self.create_error(self.tokens[self.ci - 1].pos, "dserror(23): Missing parameters initialization for function."));
     }
 
-    pub fn parse_function(&mut self, pos: Position) -> Statement {
-        Statement {
+    pub fn get_function_body(&mut self) -> Result<Vec<Statement>, ASTError> {
+        self.ci += 1;
+        match self.tokens.get(self.ci) {
+            Some(Token {
+                val: TokenType::Punc('{'),
+                pos: _
+            }) => {
+                self.ci += 1;
+                let mut statements = Vec::new();
+
+                while self.ci < self.len {
+                    let token = self.tokens[self.ci].clone();
+        
+                    match &token.val {
+                        TokenType::Punc('}') => return Ok(statements),
+                        TokenType::Keyword(key) => {
+                            let stmt = self.get_keyword_statement(key.to_string(), token.pos)?;
+                            statements.push(stmt);
+                        },
+                        TokenType::Word(word) => {
+                            self.ci += 1;
+                            let stmt = self.get_word_statement(word.to_string(), token.pos)?;
+                            statements.push(stmt);
+                        },
+                        TokenType::Punc(';') => (),
+                        _ => {
+                            let stmt = self.get_value_as_stmt()?;
+                            statements.push(stmt);
+                        }
+                    }
+        
+                    self.ci += 1;
+                }
+                
+                Err(self.create_error(self.tokens[self.ci - 1].pos, "dserror(35): Unexpected end of body."))
+            },
+            _ => Err(self.create_error(self.tokens[self.ci - 1].pos, "dserror(25): Missing body."))
+        }
+    }
+
+    pub fn get_function_statement(&mut self, pos: Position) -> Result<Statement, ASTError> {
+        Ok(Statement {
             val: StatementType::Primary(
                 Identifier::Func(
-                    self.next_word_as_str("dserror(24): Missing function name."),
-                    self.parse_function_params(),
-                    self.parse_sub_body()
+                    self.next_word_as_str("dserror(24): Missing function name.")?,
+                    self.get_function_params()?,
+                    {
+                        self.ci += 1;
+                        self.get_function_body()?
+                    }
                 )
             ),
             pos
-        }
+        })
     }
 
-    pub fn parse_async_function(&mut self, pos: Position) -> Statement {
-        match self.next_token("dserror(31): Expected `func` keyword after `async` keyword.").val {
-            TokenType::Keyword(keyword) => if keyword != "func".to_string() {
-                self.throw_error(pos, "dserror(31): Expected `func` keyword after `async` keyword.")
-            },
-            _ => self.throw_error(pos, "dserror(31): Expected `func` keyword after `async` keyword.")
+    pub fn get_async_function_statement(&mut self, pos: Position) -> Result<Statement, ASTError> {
+        self.ci += 1;
+        match self.tokens.get(self.ci) {
+            Some(Token {
+                val: TokenType::Keyword(keyword),
+                pos: _
+            }) if keyword.as_str() == "func" => (),
+            _ => return Err(self.create_error(pos, "dserror(31): Expected `func` keyword after `async` keyword."))
         }
 
-        Statement {
+        Ok(Statement {
             val: StatementType::Primary(
                 Identifier::AsyncFunc(
-                    self.next_word_as_str("dserror(24): Missing function name."),
-                    self.parse_function_params(),
-                    self.parse_sub_body()
+                    self.next_word_as_str("dserror(24): Missing function name.")?,
+                    self.get_function_params()?,
+                    {
+                        self.ci += 1;
+                        self.get_function_body()?
+                    }
                 )
             ),
             pos
-        }
+        })
     }
 
-    pub fn parse_anonymous_function(&mut self) -> Identifier {
-        Identifier::Func(
-            "anonymous".to_string(),
-            self.parse_function_params(),
-            self.parse_sub_body()
-        )
-    }
-
-    pub fn parse_anonymous_async_function(&mut self, pos: Position) -> Identifier {
-        match self.next_token("dserror(31): Expected `func` keyword after `async` keyword.").val {
-            TokenType::Keyword(keyword) => if keyword != "func".to_string() {
-                self.throw_error(pos, "dserror(31): Expected `func` keyword after `async` keyword.")
-            },
-            _ => self.throw_error(pos, "dserror(31): Expected `func` keyword after `async` keyword.")
-        }
-
-        Identifier::AsyncFunc(
-            "anonymous".to_string(),
-            self.parse_function_params(),
-            self.parse_sub_body()
-        )
-    }
-
-    pub fn parse_call_params(&mut self) -> Vec<Identifier> {
+    pub fn get_call_params(&mut self) -> Result<Vec<Identifier>, ASTError> {
         let mut params: Vec<Identifier> = Vec::new();
         let mut sep_used = false;
 
@@ -281,12 +290,13 @@ impl AST {
 
             match &token.val {
                 TokenType::Punc(')') => {
-                    if params.len() >= 255 { self.throw_error(token.pos, "dserror(38) A function can have upto 254 parameters only.") }
-                    return params
+                    return if params.len() >= 255 { 
+                        Err(self.create_error(token.pos, "dserror(38) A function can have upto 254 parameters only."))
+                    } else { Ok(params) }
                 },
                 TokenType::Punc(',') if sep_used => sep_used = false,
                 _ => {
-                    params.push(self.parse_value("dserror(7): Expected an value before termination of the statement."));
+                    params.push(self.get_value("dserror(7): Expected an value before termination of the statement.")?);
                     self.ci += 1;
                     sep_used = true;
                 }
@@ -295,11 +305,10 @@ impl AST {
             self.ci += 1;
         }
 
-        self.throw_error(self.tokens[self.ci - 2].pos, "dserror(10): Detected an unclosed bracket.");
-        params
+        Err(self.create_error(self.tokens[self.ci - 2].pos, "dserror(10): Detected an unclosed bracket."))
     }
 
-    pub fn parse_dict(&mut self) -> Identifier {
+    pub fn get_dict(&mut self) -> Result<Identifier, ASTError> {
         let mut attributes: Vec<(String, Identifier)> = Vec::new();
         let mut sep_used = false;
 
@@ -309,53 +318,64 @@ impl AST {
             match &token.val {
                 TokenType::Punc('}') => {
                     self.ci += 1;
-                    return self.parse_word_as_identifier(Identifier::Dict(attributes))
+                    return self.get_identifier_as_word(Identifier::Dict(attributes));
                 },
                 TokenType::String(key) => {
                     #[allow(mutable_borrow_reservation_conflict)]
-                    attributes.push((key.clone(), self.parse_dict_key_value(key.clone(), token.pos, false)));
+                    attributes.push((key.clone(), self.get_dict_key_value(key.clone(), token.pos, false)?));
                     sep_used = true;
                     self.ci += 1;
                 },
                 TokenType::Word(key) => {
                     #[allow(mutable_borrow_reservation_conflict)]
-                    attributes.push((key.clone(), self.parse_dict_key_value(key.clone(), token.pos, true)));
+                    attributes.push((key.clone(), self.get_dict_key_value(key.clone(), token.pos, true)?));
                     sep_used = true;
                     self.ci += 1;
                 },
                 TokenType::Punc(',') if sep_used => sep_used = false,
-                _ => {
-                    println!("{:#?}", token);
-                    self.throw_error(token.pos, "dserror(17): Dict keys must be a string or a word representation.");
-                }
+                _ => return Err(self.create_error(token.pos, "dserror(17): Dict keys must be a string or a word representation."))
             }
 
             self.ci += 1;
         }
 
-        Identifier::default()
+        Err(self.create_error(self.tokens[self.ci - 1].pos, "dserror(17): Dict keys must be a string or a word representation."))
     }
 
-    pub fn parse_dict_key_value(&mut self, key: String, pos: Position, is_word: bool) -> Identifier {
+    pub fn get_dict_key_value(&mut self, key: String, pos: Position, is_word: bool) -> Result<Identifier, ASTError> {
         if key.len() == 0 { 
-            self.throw_error(pos, "dserror(18): Dict keys strings must not be empty.") 
+            return Err(self.create_error(pos, "dserror(18): Dict keys strings must not be empty."));
         }
 
-        let sep_token = self.next_token("dserror(19): Expected `:` character to represent the value for the key.");
-        match &sep_token.val {
-            TokenType::Punc(':') => (),
+        self.ci += 1;
+        match self.tokens.get(self.ci) {
+            Some(Token {
+                val: TokenType::Punc(':'),
+                pos: _
+            }) => (),
             _ => {
                 if is_word {
                     self.ci -= 1;
-                    return Identifier::Word(key);
+                    return Ok(Identifier::Word(key));
                 }
 
-                self.throw_error(pos, "dserror(19): Expected `:` character to represent the value for the key.")
+                return Err(self.create_error(pos, "dserror(19): Expected `:` character to represent the value for the key."));
             }
         }
 
         self.ci += 1;
-        self.parse_value("dserror(20): Dict must have a value or have a direct representation.")
+        self.get_value("dserror(20): Dict must have a value or have a direct representation.")
+    }
+
+    pub fn next_word_as_str(&mut self, err: &str) -> Result<String, ASTError> {
+        self.ci += 1;
+        match self.tokens.get(self.ci) {
+            Some(Token {
+                val: TokenType::Word(str),
+                pos: _
+            }) => Ok(str.clone()),
+            _ => Err(self.create_error(self.tokens[self.ci - 2].pos, err))
+        }
     }
 
 }

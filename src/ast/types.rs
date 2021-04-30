@@ -63,15 +63,16 @@ pub enum StatementType {
     While(Identifier, Vec<Statement>),
     In(String, Identifier),
     For(ForStmt),
+    Break,
+    Continue,
+    None,
+    // TODO(Scientific-Guy): Make a better class object.
     Class {
         name: String,
         extends: Option<String>,
-        props: Vec<(String, Identifier, bool)>,
-        methods: Vec<(String, Vec<String>, Vec<Statement>, bool, bool)>
-    },
-    Break,
-    Continue,
-    None
+        props: Vec<ClassProp>,
+        methods: Vec<ClassMethod>
+    }
 }
 
 #[derive(Default, Debug, Clone)]
