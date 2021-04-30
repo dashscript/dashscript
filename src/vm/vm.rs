@@ -1,23 +1,14 @@
 use std::env;
 use std::collections::HashMap;
-use crate::common::fsize;
-use crate::bytecode::reader::LogicalOperator;
+use std::fmt;
 use super::value::{ Value, ValueRegister, ValueIndex };
 use super::vmcore::{ builtin, window, result, memory, into_value_dict, math, date, builtin::inspect };
 use super::vmcore;
-
-use crate::{
-    lexer::parser::Position,
-    common::{ get_line_col_by_line_data },
-    bytecode::{
-        main::BytecodeCompiler,
-        reader::{
-            BytecodeReader,
-            InstructionValue,
-            Instruction
-        }
-    }
-};
+use crate::lexer::parser::Position;
+use crate::bytecode::reader::LogicalOperator;
+use crate::common::{ fsize, get_line_col_by_line_data };
+use crate::bytecode::main::BytecodeCompiler;
+use crate::bytecode::reader::{ BytecodeReader, InstructionValue, Instruction };
 
 #[derive(Debug)]
 pub struct RuntimeError {
@@ -28,6 +19,18 @@ pub struct RuntimeError {
     pub end: usize,
     pub line: usize,
     pub col: usize
+}
+
+impl fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut address = String::new();
+
+        for frame in self.call_frames.clone().into_iter().rev() {
+            address += &format!("    at {}\n", frame).to_string();
+        }
+
+        write!(f, "{} ({}:{}:{})\n{}", self.message, self.filename, self.line, self.col, address)
+    }
 }
 
 #[derive(Clone)]
@@ -45,7 +48,7 @@ pub struct VM {
 
 impl VM {
 
-    pub fn new(compiler: BytecodeCompiler, filename: String, body: String, permissions: Vec<String>) -> Result<VM, RuntimeError> {
+    pub fn new(compiler: BytecodeCompiler, filename: String, body: String, permissions: Vec<String>) -> Result<Self, RuntimeError> {
         let mut vm = Self {
             pos_map: compiler.pos_map.clone(),
             filename: filename,
@@ -65,6 +68,20 @@ impl VM {
         vm.init_core();
         vm.execute_body()?;
         Ok(vm)
+    }
+
+    pub fn default(filename: String, permissions: Vec<String>) -> Self {
+        Self {
+            pos_map: Vec::new(),
+            filename,
+            reader: BytecodeReader::default(),
+            call_stack: Vec::new(),
+            value_stack: Vec::<Value>::new(),
+            value_register: Vec::new(),
+            current_depth: 0,
+            body_line_data: Vec::new(),
+            permissions
+        }
     }
 
     pub fn execute_body(&mut self) -> Result<(), RuntimeError> {
@@ -198,7 +215,7 @@ impl VM {
                         },
                         None => {
                             if last_stack {
-                                if op == 0 {
+                                if op != 0 {
                                     return Err(self.create_error(
                                         format!(
                                             "UnexpectedAssignment: You can only assign a value if the previous value is null but you have used a `{}` operator.",
