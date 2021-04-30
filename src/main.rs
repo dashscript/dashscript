@@ -15,6 +15,7 @@ fn main() {
 
     match command.args[1].as_str() {
         "run" => cli::run::run(&command),
+        "repl" => cli::repl::start_repl(&command),
         _ => ()
     }
 
