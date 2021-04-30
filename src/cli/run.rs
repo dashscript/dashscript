@@ -1,12 +1,10 @@
-use std::{ path::PathBuf };
+use std::path::PathBuf;
 use std::fs::read_to_string;
-use crate::{ 
-    cli::command::Command, 
-    lexer::parser::Lexer,
-    ast::main::AST,
-    bytecode::main::BytecodeCompiler,
-    vm::vm::VM
-};
+use crate::cli::command::Command;
+use crate::lexer::parser::Lexer;
+use crate::ast::main::AST;
+use crate::bytecode::main::BytecodeCompiler;
+use crate::vm::vm::VM;
 
 pub fn run(cli: &Command) {
 
@@ -31,7 +29,7 @@ pub fn run(cli: &Command) {
         }
     };
 
-    let compiler = BytecodeCompiler::new(match AST::new(&cli.args[2], &lexer) {
+    let compiler = BytecodeCompiler::new(match AST::new(&lexer) {
         Ok(ast) => ast,
         Err(err) => {
             println!("{}", err);

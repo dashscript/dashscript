@@ -10,11 +10,12 @@ fn main() {
     let command = cli::command::Command::new();
 
     if command.args.len() == 1 {
-        command.log_error("NoCommandError: No command has been provided to execute.".to_string());
+        cli::repl::start_repl(&command);
     }
 
-    if command.args[1] == "run" {
-        cli::run::run(&command);
+    match command.args[1].as_str() {
+        "run" => cli::run::run(&command),
+        _ => ()
     }
 
 }

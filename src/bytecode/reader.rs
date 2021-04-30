@@ -3,7 +3,7 @@ use crate::common::{ fsize, MAX_BYTES };
 use crate::lexer::parser::Position;
 use super::main::{ BytecodeCompiler, Opcode };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BytecodeReader {
     pub bytes: Vec<u8>,
     pub constants: Vec<String>,

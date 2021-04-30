@@ -15,9 +15,9 @@ pub struct AST {
 
 impl AST {
 
-    pub fn new(filename: &String, lexer: &Lexer) -> Result<AST, ASTError> {
+    pub fn new(lexer: &Lexer) -> Result<AST, ASTError> {
         let this = &mut AST { 
-            filename: filename.clone(), 
+            filename: lexer.filename.clone(), 
             statements: Vec::new(),
             tokens: lexer.tokens.clone(),
             body: lexer.body.clone(),
