@@ -279,7 +279,7 @@ impl VM {
                         }
                     },
                     _ => Err(self.create_error(
-                        format!("UnexpectedAttributeAccess: You cannot access attributes of type {}.", target.type_as_str()), 
+                        format!("UnexpectedAttributeAccess: You cannot set attributes of type {}.", target.type_as_str()), 
                         pos
                     ))
                 }
