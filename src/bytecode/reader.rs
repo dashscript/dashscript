@@ -83,6 +83,7 @@ impl BytecodeReader {
 
     pub fn parse_byte(&mut self, op: u8) -> Instruction {
         self.ci += 1;
+        
         let instruction = match Opcode::from(op) {
             Opcode::Var => Instruction::Var(
                 self.ci-1,
@@ -154,8 +155,11 @@ impl BytecodeReader {
                 let mut main_chain = Vec::new();
 
                 for _ in 0..length {
-                    let val = self.parse_value(Opcode::from(self.bytes[self.ci]));
+                    self.ci += 1;
+                    let val = self.parse_value(Opcode::from(self.bytes[self.ci-1]));
                     let mut chunk = Vec::new();
+                    self.ci += 1;
+                    
                     main_chain.push((val, loop {
                         if self.ci < self.len {
                             match Opcode::from(self.bytes[self.ci]) {
@@ -168,15 +172,34 @@ impl BytecodeReader {
                             break chunk;
                         }
                     }));
+
                     self.ci += 1;
                 }
 
-                let instruction = Instruction::Condition(self.ci, main_chain, match self.get_byte() {
-                    _ => None
-                });
+                return Instruction::Condition(self.ci, main_chain, match self.bytes.get(self.ci) {
+                    Some(1) => {
+                        let mut chunk = Vec::new();
+                        self.ci += 1;
 
-                self.ci += 1;
-                instruction
+                        while self.ci < self.len {
+                            match Opcode::from(self.bytes[self.ci]) {
+                                Opcode::BodyEnd => {
+                                    self.ci += 1;
+                                    break
+                                },
+                                _ => chunk.push(self.bytes[self.ci])
+                            }
+        
+                            self.ci += 1;
+                        }
+                        
+                        Some(chunk)
+                    },
+                    _ => {
+                        self.ci += 1;
+                        None
+                    }
+                })
             },
             opcode => Instruction::Value(self.ci, self.parse_value(opcode))
         };
@@ -407,7 +430,7 @@ impl BytecodeReader {
     }
 
     pub fn next(&mut self) -> Option<Instruction> {
-        if (self.ci+1) < self.len {
+        if self.ci < self.len {
             Some(self.parse_byte(self.bytes[self.ci]))
         } else {
             None

@@ -129,9 +129,29 @@ impl VM {
                         reader.bytes = chunk.clone();
                         self.current_depth += 1;
 
+                        while reader.ci+1 < reader.len {
+                            self.execute_instruction(reader.parse_byte(chunk[reader.ci]))?;
+                        }
+
                         self.current_depth -= 1;
                         return Ok(());
                     }
+                }
+
+                if else_chunk.is_some() {
+                    let mut reader = self.reader.clone();
+                    let chunk = else_chunk.unwrap();
+                    reader.pos_map.clear();
+                    reader.ci = 0;
+                    reader.len = chunk.len();
+                    reader.bytes = chunk.clone();
+                    self.current_depth += 1;
+
+                    while reader.ci+1 < reader.len {
+                        self.execute_instruction(reader.parse_byte(chunk[reader.ci]))?;
+                    }
+
+                    self.current_depth -= 1;
                 }
 
                 Ok(())

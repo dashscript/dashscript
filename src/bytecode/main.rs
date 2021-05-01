@@ -88,6 +88,7 @@ impl BytecodeCompiler {
 
     pub fn parse_byte(&mut self, stmt: Statement) {
         self.push_pos(stmt.pos);
+        
         match &stmt.val {
             StatementType::Var(name, val, is_const) => {
                 self.bytes.push(if *is_const { Opcode::Const } else { Opcode::Var } as u8);

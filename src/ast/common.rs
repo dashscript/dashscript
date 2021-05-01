@@ -147,10 +147,16 @@ impl AST {
                             val: StatementType::Condition(conditions, Some(self.get_sub_body()?)),
                             pos
                         }),
-                        _ => break
+                        _ => {
+                            self.ci -= 1;
+                            break
+                        }
                     }
                 },
-                _ => break
+                _ => {
+                    self.ci -= 1;
+                    break
+                }
             }
 
             self.ci += 1;
