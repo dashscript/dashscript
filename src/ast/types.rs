@@ -32,17 +32,6 @@ pub enum Identifier {
     Null
 }
 
-impl Identifier {
-    
-    pub fn is_null(&self) -> bool {
-        match self {
-            Identifier::Null => true,
-            _ => false
-        }
-    }
-
-}
-
 impl Default for Identifier {
     fn default() -> Self { Identifier::Null }
 }

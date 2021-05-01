@@ -10,7 +10,10 @@ impl AST {
 
         while self.ci < self.len {
             let token = self.tokens[self.ci].clone();
-            let res_is_null = res.is_null();
+            let res_is_null = match res {
+                Identifier::Null => true,
+                _ => false
+            };
 
             match &token.val {
                 TokenType::String(str) if res_is_null => {
