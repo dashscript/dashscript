@@ -41,6 +41,7 @@ pub enum Opcode {
     And,
     In,
     Func,
+    RestParam,
     BodyEnd,
     Return,
     GreaterThan,
@@ -215,7 +216,10 @@ impl BytecodeCompiler {
                 self.bytes.push(0);
                 self.push_constant_without_op(name);
                 self.bytes.push(params.len() as u8);
-                for param in params { self.push_constant_without_op(param) };
+                for param in params {
+                    if param.1 { self.bytes.push(Opcode::RestParam as u8) }
+                    self.push_constant_without_op(param.0.as_str());
+                };
                 
                 let mut i = 0;
                 while i < stmts.len() {
@@ -230,7 +234,10 @@ impl BytecodeCompiler {
                 self.bytes.push(1);
                 self.push_constant_without_op(name);
                 self.bytes.push(params.len() as u8);
-                for param in params { self.push_constant_without_op(param) };
+                for param in params {
+                    if param.1 { self.bytes.push(Opcode::RestParam as u8) }
+                    self.push_constant_without_op(param.0.as_str());
+                };
                 
                 let mut i = 0;
                 while i < stmts.len() {

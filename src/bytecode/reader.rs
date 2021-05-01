@@ -44,7 +44,7 @@ pub enum InstructionValue {
     Or(Box<InstructionValue>, Box<InstructionValue>),
     // TODO(Scientific-Guy): Support for `in` keyword places rather only in for loops.
     In(Box<InstructionValue>, Box<InstructionValue>),
-    Func(u32, Vec<u32>, Vec<u8>, bool),
+    Func(u32, Vec<(u32, bool)>, Vec<u8>, bool),
     Condition(Box<InstructionValue>, LogicalOperator, Box<InstructionValue>),
     True,
     False,
@@ -83,7 +83,7 @@ impl BytecodeReader {
 
     pub fn parse_byte(&mut self, op: u8) -> Instruction {
         self.ci += 1;
-        
+
         let instruction = match Opcode::from(op) {
             Opcode::Var => Instruction::Var(
                 self.ci-1,
@@ -285,7 +285,22 @@ impl BytecodeReader {
                 self.ci += 1;
                 let mut params = Vec::new();
                 for _ in 0..param_len {
-                    params.push(self.get_len_based_constant_idx());
+                    match Opcode::from(self.bytes[self.ci]) {
+                        Opcode::Short => {
+                            self.ci += 1;
+                            params.push((self.get_byte() as u32, false));
+                        },
+                        Opcode::Long => {
+                            self.ci += 1;
+                            params.push((self.get_u32(), false));
+                        },
+                        Opcode::RestParam => {
+                            self.ci += 1;
+                            params.push((self.get_len_based_constant_idx(), true));
+                        },
+                        _ => ()
+                    }
+
                     self.ci += 1;
                 }
 

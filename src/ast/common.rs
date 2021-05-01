@@ -1,6 +1,6 @@
 use crate::lexer::parser::{ Position, TokenType, AssignmentOp, Token };
 use super::main::{ AST, ASTError };
-use super::types::{ Identifier, Statement, StatementType };
+use super::types::{ Identifier, Statement, StatementType, FuncParam };
 
 impl AST {
 
@@ -165,7 +165,7 @@ impl AST {
         Ok(Statement { val: StatementType::Condition(conditions, None), pos })
     }
 
-    pub fn get_function_params(&mut self) -> Result<Vec<String>, ASTError> {
+    pub fn get_function_params(&mut self) -> Result<Vec<FuncParam>, ASTError> {
         self.ci += 1;
         match self.tokens.get(self.ci) {
             Some(Token {
@@ -175,7 +175,7 @@ impl AST {
             _ => return Err(self.create_error(self.tokens[self.ci].pos, "dserror(23): Missing parameters initialization for function."))
         }
         
-        let mut params: Vec<String> = Vec::new();
+        let mut params: Vec<FuncParam> = Vec::new();
         let mut sep_used = false;
 
         while self.ci < self.len {
@@ -191,8 +191,25 @@ impl AST {
                         Ok(params)
                     }
                 },
+                TokenType::Punc('.') => {
+                    return match self.tokens.get(self.ci..self.ci+5) {
+                        Some([
+                            Token { val: TokenType::Punc('.'), pos: _ },
+                            Token { val: TokenType::Punc('.'), pos: _ },
+                            Token { val: TokenType::Punc('.'), pos: _ },
+                            Token { val: TokenType::Word(name), pos: _ },
+                            Token { val: TokenType::Punc(')'), pos: _ }
+                        ]) => {
+                            params.push((name.clone(), true));
+                            // Could be an error
+                            self.ci += 3;
+                            Ok(params)
+                        },
+                        _ => Err(self.create_error(token.pos, "dserror(14): Unexpected identifier."))
+                    }
+                },
                 TokenType::Word(name) => {
-                    params.push(name.to_string());
+                    params.push((name.clone(), false));
                     sep_used = true;
                 },
                 _ => return Err(self.create_error(token.pos, "dserror(14): Unexpected identifier."))

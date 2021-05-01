@@ -21,8 +21,8 @@ pub enum Identifier {
     Array(Vec<Identifier>),
     Dict(Vec<(String, Identifier)>),
     Group(Box<Identifier>),
-    Func(String, Vec<String>, Vec<Statement>),
-    AsyncFunc(String, Vec<String>, Vec<Statement>),
+    Func(String, Vec<FuncParam>, Vec<Statement>),
+    AsyncFunc(String, Vec<FuncParam>, Vec<Statement>),
     Or(Box<Identifier>, Box<Identifier>),
     And(Box<Identifier>, Box<Identifier>),
     Invert(Box<Identifier>),
@@ -88,4 +88,5 @@ impl std::default::Default for StatementType {
 }
 
 pub type ClassProp = (String, Identifier, bool);
-pub type ClassMethod = (String, Vec<String>, Vec<Statement>, bool, bool);
+pub type ClassMethod = (String, Vec<FuncParam>, Vec<Statement>, bool, bool);
+pub type FuncParam = (String, bool);

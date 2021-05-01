@@ -543,7 +543,7 @@ impl VM {
     pub fn execute_func(
         &mut self,
         id: u32,
-        param_ids: Vec<u32>,
+        param_ids: Vec<(u32, bool)>,
         params: Vec<Value>,
         chunk: Vec<u8>
     ) -> Result<Value, RuntimeError> {
@@ -559,26 +559,38 @@ impl VM {
         reader.bytes = chunk;
 
         for i in 0..param_ids.len() {
-            self.add_value(
-                self.reader.get_constant(param_ids[i] as usize),
-                match params.get(i as usize) {
-                    Some(val) => val.clone(),
-                    None => Value::Null
-                },
-                true
-            );
-        }
+            let val = {
+                if !param_ids[i].1 {
+                    match params.get(i as usize) {
+                        Some(val) => val.clone(),
+                        None => Value::Null
+                    }
+                } else {
+                    match params.get(i..) {
+                        Some(params) => {
+                            let mut ids = vec![];
+                            for param in params {
+                                self.value_stack.push(param.clone());
+                                ids.push(self.value_stack.len() as u32 - 1);
+                            }
 
-        loop {
-            if (reader.ci+1) < reader.len {
-                match reader.parse_byte(reader.bytes[reader.ci]) {
-                    Instruction::Return(pos, val) => return self.execute_value(val, pos),
-                    instruction => {
-                        self.execute_instruction(instruction)?;
+                            Value::Array(ids)
+                        },
+                        None => Value::Array(vec![])
                     }
                 }
-            } else {
-                break
+            };
+
+            self.add_value(self.reader.get_constant(param_ids[i].0 as usize), val, true);
+        }
+
+        // TODO(Scientific-Guy): Prevent unwated bytes to overlap the function code.
+        while (reader.ci + 1) < reader.len {
+            match reader.parse_byte(reader.bytes[reader.ci]) {
+                Instruction::Return(pos, val) => return self.execute_value(val, pos),
+                instruction => {
+                    self.execute_instruction(instruction)?;
+                }
             }
         }
 

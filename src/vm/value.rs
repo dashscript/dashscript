@@ -50,7 +50,7 @@ pub enum Value {
     // Array is used as a value type instead of an object because to prevent unwanted memory of attributes in value register.
     // TODO(Scientific-Guy): Find a way to make array as an object instead of a value type.
     Array(Vec<u32>),
-    Func(u32, Vec<u32>, Vec<u8>, bool),
+    Func(u32, Vec<(u32, bool)>, Vec<u8>, bool),
     Null
 }
 
