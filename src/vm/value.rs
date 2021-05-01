@@ -127,3 +127,5 @@ pub struct ValueRegister {
     pub depth: u16,
     pub mutable: bool
 }
+
+pub type AttributeIndex = HashMap<ValueIndex, (u32, bool)>;

@@ -4,7 +4,6 @@ pub mod ast;
 pub mod bytecode;
 pub mod vm;
 pub mod common;
-pub mod fmt;
 
 fn main() {
 
@@ -17,7 +16,6 @@ fn main() {
     match command.args[1].as_str() {
         "run" => cli::run::run(&command),
         "repl" => cli::repl::start_repl(&command),
-        "fmt" => cli::fmt::fmt(&command),
         _ => ()
     }
 

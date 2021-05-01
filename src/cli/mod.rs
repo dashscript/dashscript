@@ -1,7 +1,6 @@
 pub mod run;
 pub mod command;
 pub mod repl;
-pub mod fmt;
 
 use std::fs::read_to_string;
 use std::path::PathBuf;
