@@ -171,7 +171,7 @@ impl AST {
     pub fn get_value_as_stmt(&mut self) -> Result<Statement, ASTError> {
         Ok(Statement {
             val: StatementType::Primary(self.get_value("dserror(14): Unexpected identifier")?),
-            pos: self.tokens[if self.ci <= self.len { self.ci } else { self.len - 1 }].pos
+            pos: self.tokens[if self.ci < self.len { self.ci } else { self.len - 1 }].pos
         })
     }
 
