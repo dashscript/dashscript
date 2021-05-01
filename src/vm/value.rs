@@ -128,4 +128,8 @@ pub struct ValueRegister {
     pub mutable: bool
 }
 
-pub type AttributeIndex = HashMap<ValueIndex, (u32, bool)>;
+impl ValueRegister {
+    pub fn update_id(&mut self, id: u32) {
+        self.id = id;
+    }
+}
