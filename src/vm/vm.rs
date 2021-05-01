@@ -386,19 +386,13 @@ impl VM {
                                     Value::Boolean(false)
                                 }
                             }),
-                            _ => return Err(self.create_error(
-                                format!("UnexpectedAttributeAccess: Unknown property {:?} accessing a string.", attr),
-                                pos
-                            ))
+                            _ => Value::Null
                         }),
                         ValueIndex::Num(index) => Ok(match str.chars().nth(index.0 as usize) {
                             Some(char) => Value::Str(char.to_string()),
                             None => Value::Null
                         }),
-                        _ => return Err(self.create_error(
-                            format!("UnexpectedAttributeAccess: Unknown property {:?} accessing a string.", attr),
-                            pos
-                        )), 
+                        _ => Ok(Value::Null), 
                     },
                     Value::Array(arr) => match attr {
                         ValueIndex::Num(num) => {
@@ -412,10 +406,7 @@ impl VM {
                                 None => builtin::panic(format!("MemoryFailure: Could not find pointer {}.", index), self)
                             })
                         },
-                        attr => return Err(self.create_error(
-                            format!("UnexpectedAttributeAccess: Cannot find attribute {:?} in array.", attr), 
-                            pos
-                        ))
+                        _ => Ok(Value::Null)
                     },
                     _ => return Err(self.create_error(
                         format!("UnexpectedAttributeAccess: You cannot access attributes of type {}.", body.type_as_str()), 
