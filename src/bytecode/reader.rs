@@ -28,7 +28,7 @@ pub enum InstructionValue {
     Num(fsize),
     Word(u32),
     Attr(Box<InstructionValue>, Box<InstructionValue>),
-    Call(Box<InstructionValue>, Vec<InstructionValue>),
+    Call(Box<InstructionValue>, Vec<(InstructionValue, bool)>),
     Add(Box<InstructionValue>, Box<InstructionValue>),
     Sub(Box<InstructionValue>, Box<InstructionValue>),
     Div(Box<InstructionValue>, Box<InstructionValue>),
@@ -328,11 +328,17 @@ impl BytecodeReader {
                     let mut params = Vec::new();
 
                     for _ in 0..len {
-                        self.ci += 1;
                         params.push({
+                            self.ci += 1;
                             let op = Opcode::from(self.bytes[self.ci]);
                             self.ci += 1;
-                            self.parse_value(op)
+                            match op {
+                                Opcode::RestParam => ({
+                                    self.ci += 1;
+                                    self.parse_value(Opcode::from(self.bytes[self.ci - 1]))
+                                }, true),
+                                _ => (self.parse_value(op), false)
+                            }
                         });
                     }
 

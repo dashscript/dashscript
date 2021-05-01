@@ -418,7 +418,13 @@ impl VM {
                 let call_body = self.execute_value(*val, pos)?;
                 let mut call_params = Vec::new();
                 for param in params.iter() {
-                    call_params.push(self.execute_value(param.clone(), pos)?)
+                    let val = self.execute_value(param.0.clone(), pos)?;
+                    if param.1 {
+                        call_params.extend(val.to_vec(self));
+                        continue;
+                    }
+
+                    call_params.push(val)
                 }
 
                 match call_body {

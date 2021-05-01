@@ -10,7 +10,7 @@ pub enum Identifier {
     Number(fsize),
     Word(String),
     Attribute(Box<Identifier>, Box<Identifier>),
-    Call(Box<Identifier>, Vec<Identifier>),
+    Call(Box<Identifier>, Vec<(Identifier, bool)>),
     Add(Box<Identifier>, Box<Identifier>),
     Subtract(Box<Identifier>, Box<Identifier>),
     Multiply(Box<Identifier>, Box<Identifier>),

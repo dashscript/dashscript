@@ -302,8 +302,8 @@ impl AST {
         })
     }
 
-    pub fn get_call_params(&mut self) -> Result<Vec<Identifier>, ASTError> {
-        let mut params: Vec<Identifier> = Vec::new();
+    pub fn get_call_params(&mut self) -> Result<Vec<(Identifier, bool)>, ASTError> {
+        let mut params = Vec::new();
         let mut sep_used = false;
 
         while self.ci < self.len {
@@ -316,8 +316,23 @@ impl AST {
                     } else { Ok(params) }
                 },
                 TokenType::Punc(',') if sep_used => sep_used = false,
+                TokenType::Punc('.') => {
+                    match self.tokens.get(self.ci..self.ci+3) {
+                        Some([
+                            Token { val: TokenType::Punc('.'), pos: _ },
+                            Token { val: TokenType::Punc('.'), pos: _ },
+                            Token { val: TokenType::Punc('.'), pos: _ },
+                        ]) => {
+                            self.ci += 3;
+                            params.push((self.get_value("dserror(7): Expected an value before termination of the statement.")?, true));
+                            self.ci += 1;
+                            sep_used = true;
+                        },
+                        _ => return Err(self.create_error(token.pos, "dserror(14): Unexpected identifier."))
+                    }
+                },
                 _ => {
-                    params.push(self.get_value("dserror(7): Expected an value before termination of the statement.")?);
+                    params.push((self.get_value("dserror(7): Expected an value before termination of the statement.")?, false));
                     self.ci += 1;
                     sep_used = true;
                 }

@@ -54,6 +54,10 @@ pub enum Value {
     Null
 }
 
+impl Default for Value {
+    fn default() -> Self { Value::Null }
+}
+
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -97,6 +101,20 @@ impl Value {
             Value::Num(num) => ValueIndex::Num(FloatLike(num.clone())),
             Value::Str(str) => ValueIndex::Str(str.clone()),
             _ => ValueIndex::Null
+        }
+    }
+
+    pub fn to_vec(&self, vm: &mut VM) -> Vec<Self> {
+        match self {
+            Value::Array(arr) => {
+                let mut res = vec![];
+                for item in arr {
+                    res.push(vm.value_stack.get(*item as usize).unwrap_or(&Value::Null).clone())
+                }
+
+                res
+            },
+            _ => vec![]
         }
     }
 

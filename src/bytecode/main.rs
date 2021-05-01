@@ -158,7 +158,10 @@ impl BytecodeCompiler {
                 self.bytes.push(Opcode::Call as u8);
                 self.load_identifier(ident);
                 self.bytes.push(params.len() as u8);
-                for param in params.iter() { self.load_identifier(param) };
+                for param in params.iter() { 
+                    if param.1 { self.bytes.push(Opcode::RestParam as u8) }
+                    self.load_identifier(&param.0)
+                };
             },
             Identifier::Attribute(ident, attr) => {
                 self.bytes.push(Opcode::Attr as u8);
