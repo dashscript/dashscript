@@ -284,8 +284,12 @@ impl VM {
                     ))
                 }
             },
+            InstructionValue::Dict(_) | InstructionValue::Call(_, _) => return Err(self.create_error(
+                format!("UnexpectedAssignment: You cannot directly set properties. Attempt to assign it as a variable and then assign it."), 
+                pos
+            )),
             _ => return Err(self.create_error(
-                format!("UnexpectedAssignment: You can assing over only a mutable variable only."), 
+                format!("UnexpectedAssignment: Detected an unexpected assignment."), 
                 pos
             ))
         }
