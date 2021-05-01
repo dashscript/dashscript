@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::fs::read_to_string;
+use super::read_file;
 use crate::cli::command::Command;
 use crate::lexer::parser::Lexer;
 use crate::ast::main::AST;
@@ -7,7 +7,6 @@ use crate::bytecode::main::BytecodeCompiler;
 use crate::vm::vm::VM;
 
 pub fn run(cli: &Command) {
-
     if cli.args.len() <= 2 {
         cli.log_error("InvalidFileError: No file name specified.".to_string());
     }
@@ -17,7 +16,7 @@ pub fn run(cli: &Command) {
         Ok(content) => content,
         Err(e) => {
             cli.log_error("InvalidFileError: Could not read file: ".to_string() + format!("{:?}", e).as_str());
-            String::new()
+            std::process::exit(0);
         }
     };
 
@@ -44,8 +43,6 @@ pub fn run(cli: &Command) {
         return;
     }
 
-    // println!("{:?}\n{:?}", compiler.bytes, compiler.constants);
-
     match VM::new(
         compiler, 
         cli.args[2].clone(),
@@ -58,10 +55,4 @@ pub fn run(cli: &Command) {
             std::process::exit(0);
         }
     };
-
-}
-
-fn read_file(fname: PathBuf) -> Result<String, std::io::Error> {
-    let body = read_to_string(fname)?;
-    Ok(String::from(body))
 }
