@@ -351,6 +351,16 @@ impl VM {
                                     Value::Boolean(false)
                                 }
                             }),
+                            "escapeDebug" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, _| {
+                                if let Value::Str(str) = this {
+                                    Value::Str(str.escape_debug().to_string())
+                                } else {
+                                    Value::Null
+                                }
+                            }),
+                            "trim" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, _| {
+                                if let Value::Str(str) = this { Value::Str(str.trim().to_string()) } else { Value::Null }
+                            }),
                             _ => Value::Null
                         }),
                         ValueIndex::Num(index) => Ok(match str.chars().nth(index.0 as usize) {
