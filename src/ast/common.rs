@@ -233,7 +233,7 @@ impl AST {
 
                 while self.ci < self.len {
                     let token = self.tokens[self.ci].clone();
-        
+                    
                     match &token.val {
                         TokenType::Punc('}') => return Ok(statements),
                         TokenType::Keyword(key) => {

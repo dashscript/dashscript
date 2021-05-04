@@ -133,3 +133,20 @@ impl ValueRegister {
         self.id = id;
     }
 }
+
+pub enum Break {
+    Break,
+    Return(Value),
+    None
+}
+
+impl Break {
+
+    pub fn is_some(&self) -> bool {
+        match self {
+            Break::None => true,
+            _ => false
+        }
+    }
+
+}
