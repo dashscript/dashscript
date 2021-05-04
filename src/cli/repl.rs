@@ -42,7 +42,6 @@ pub fn start_repl(cli: &Command) {
             }
         };
 
-        vm.frames.clear();
         vm.pos_map.clear();
         vm.reader = BytecodeReader::new(
             BytecodeCompiler::new(match AST::new(&lexer) {

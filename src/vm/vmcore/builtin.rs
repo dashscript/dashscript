@@ -1,4 +1,4 @@
-use std::io::stdin;
+use std::io::{ stdin, stdout, Write };
 use crate::vm::vm::VM;
 use crate::vm::value::{ Value, ValueIndex };
 use crate::common::get_line_col_by_line_data;
@@ -120,11 +120,18 @@ pub fn readline_api(_this: Value, _args: Vec<Value>, vm: &mut VM) -> Value {
 pub fn prompt_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     match args.get(0) {
         Some(val) => match val {
-            Value::Str(str) => println!("{}", str),
+            Value::Str(str) => print!("{}", str),
             _ => print!("{}", inspect(val.clone(), vm))
         },
         _ => ()
     }
+
+    if let Err(e) = stdout().flush() {
+        return err(into_value_dict(vec![
+            ("kind", Value::Str(format!("{:?}", e.kind())), false),
+            ("message", Value::Str(format!("{:?}", e)), false)
+        ], vm), vm);
+    };
 
     readline(vm)
 }
@@ -132,12 +139,19 @@ pub fn prompt_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
 pub fn confirm_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     match args.get(0) {
         Some(val) => match val {
-            Value::Str(str) => println!("{}", str),
+            Value::Str(str) => print!("{}", str),
             _ => print!("{}", inspect(val.clone(), vm))
         },
         _ => ()
     }
 
+    if let Err(e) = stdout().flush() {
+        return err(into_value_dict(vec![
+            ("kind", Value::Str(format!("{:?}", e.kind())), false),
+            ("message", Value::Str(format!("{:?}", e)), false)
+        ], vm), vm);
+    };
+    
     match readline(vm) {
         Value::Str(str) => match str.as_str() {
             "y" | "Y" => Value::Boolean(true),
