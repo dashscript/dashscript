@@ -683,6 +683,7 @@ impl VM {
         self.value_register.push(ValueRegister {
             key: name,
             id: self.value_stack.len() as u32 - 1,
+            depth: self.frames.len() as u32 - 1,
             mutable
         });
     }
@@ -800,36 +801,39 @@ impl VM {
     pub fn get_value(&mut self, id: u32) -> Value {
         let mut i = self.value_register.len() - 1;
         let key = self.reader.get_constant(id as usize);
+        let depth = self.frames.len() as u32 - 1;
 
-        while i >= self.frames.last().unwrap().vi {
+        loop {
             let value = self.value_register[i].clone();
-            if value.key == key {
+            if (value.key == key) && (value.depth <= depth) {
                 return self.value_stack[value.id as usize].clone();
             }
 
+            if i == 0 { return Value::Null }
             i -= 1;
         }
-
-        Value::Null
     }
 
     pub fn get_value_register(&mut self, id: u32) -> Result<ValueRegister, RuntimeError> {
         let mut i = self.value_register.len() - 1;
         let key = self.reader.get_constant(id as usize);
+        let depth = self.frames.len() as u32 - 1;
 
-        while i >= self.frames.last().unwrap().vi {
+        loop {
             let value = self.value_register[i].clone();
-            if value.key == key {
+            if (value.key == key) && (value.depth <= depth) {
                 return Ok(value);
+            }
+
+            if i == 0 {
+                return Err(self.create_error(
+                    format!("ExpectedValueStack: Expected an value stack for {}.", key),
+                    self.reader.ci
+                ))
             }
 
             i -= 1;
         }
-
-        return Err(self.create_error(
-            format!("ExpectedValueStack: Expected an value stack for {}.", key),
-            self.reader.ci
-        ))
     }
 
 }

@@ -140,7 +140,8 @@ impl Value {
 pub struct ValueRegister {
     pub key: String,
     pub id: u32,
-    pub mutable: bool
+    pub mutable: bool,
+    pub depth: u32
 }
 
 pub enum Break {
