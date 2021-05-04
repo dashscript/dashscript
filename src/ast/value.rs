@@ -83,7 +83,7 @@ impl AST {
                         _ => ()
                     }
 
-                    if self.current_token().val == TokenType::Punc(';') { continue }
+                    if self.tokens[if self.ci < self.len { self.ci } else { self.len - 1 }].val == TokenType::Punc(';') { continue }
                 },
                 TokenType::LogicalOperator(op) => {
                     match op.as_str() {
