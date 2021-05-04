@@ -11,6 +11,7 @@ main_test.*
 main.ds
 main.exe
 main.pdb
+main.js
 test.exe
 test.pdb
 test.rs

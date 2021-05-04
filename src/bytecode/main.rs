@@ -42,7 +42,6 @@ pub enum Opcode {
     In,
     Func,
     RestParam,
-    BodyEnd,
     Return,
     GreaterThan,
     GreaterThanOrEqual,
@@ -52,6 +51,7 @@ pub enum Opcode {
     NotEqual,
     While,
     Break,
+    Continue,
     Condition,
     Long, // Used to discriminate is the index u32
     Short // Used to discriminate is the index u8
@@ -79,7 +79,7 @@ impl BytecodeCompiler {
 
     pub fn parse_to_bytes(&mut self) {
         let mut i = 0;
-
+        
         while i < self.ast.statements.len() {
             let stmt = self.ast.statements[i].clone();
             self.parse_byte(stmt);
@@ -88,8 +88,6 @@ impl BytecodeCompiler {
     }
 
     pub fn parse_byte(&mut self, stmt: Statement) {
-        self.push_pos(stmt.pos);
-        
         match &stmt.val {
             StatementType::Var(name, val, is_const) => {
                 self.bytes.push(if *is_const { Opcode::Const } else { Opcode::Var } as u8);
@@ -108,31 +106,41 @@ impl BytecodeCompiler {
             },
             StatementType::Primary(ident) => self.load_identifier(ident),
             StatementType::Break => self.bytes.push(Opcode::Break as u8),
+            StatementType::Continue => self.bytes.push(Opcode::Condition as u8),
             StatementType::While(ident, stmts) => {
                 self.bytes.push(Opcode::While as u8);
                 self.load_identifier(ident);
+                
+                // TODO(Scientific-Guy): Make a better way to gather chunk as bytecode instead of cloning and performing works.
+                let si = self.bytes.len();
                 for stmt in stmts {
                     self.parse_byte(stmt.clone());
                 }
 
-                self.bytes.push(Opcode::BodyEnd as u8);
+                self.bytes.splice(si..si, ((self.bytes.len() - si) as u16).to_le_bytes().iter().cloned());
             },
             StatementType::Condition(main_chain, else_chain) => {
                 self.bytes.extend_from_slice(&[Opcode::Condition as u8, main_chain.len() as u8]);
                 for (chain, stmts) in main_chain {
                     self.load_identifier(chain);
+                    // TODO(Scientific-Guy): Make a better way to gather chunk as bytecode instead of cloning and performing works.
+                    let si = self.bytes.len();
                     for stmt in stmts {
                         self.parse_byte(stmt.clone());
                     }
 
-                    self.bytes.push(Opcode::BodyEnd as u8);
+                    self.bytes.splice(si..si, ((self.bytes.len() - si) as u16).to_le_bytes().iter().cloned());
                 }
 
                 if else_chain.is_some() {
                     self.bytes.push(1);
+                    // TODO(Scientific-Guy): Make a better way to gather chunk as bytecode instead of cloning and performing works.
+                    let si = self.bytes.len();
                     for stmt in else_chain.clone().unwrap() {
                         self.parse_byte(stmt);
                     }
+
+                    self.bytes.splice(si..si, ((self.bytes.len() - si) as u16).to_le_bytes().iter().cloned());
                 } else {
                     self.bytes.push(0);
                 }
@@ -224,13 +232,13 @@ impl BytecodeCompiler {
                     self.push_constant_without_op(param.0.as_str());
                 };
                 
-                let mut i = 0;
-                while i < stmts.len() {
-                    self.parse_byte(stmts[i].clone());
-                    i += 1;
+                // TODO(Scientific-Guy): Make a better way to gather chunk as bytecode instead of cloning and performing works.
+                let si = self.bytes.len();
+                for stmt in stmts {
+                    self.parse_byte(stmt.clone());
                 }
-
-                self.bytes.push(Opcode::BodyEnd as u8);
+                
+                self.bytes.splice(si..si, ((self.bytes.len() - si) as u16).to_le_bytes().iter().cloned()); 
             },
             Identifier::AsyncFunc(name, params, stmts) => {
                 self.bytes.push(Opcode::Func as u8);
@@ -242,13 +250,13 @@ impl BytecodeCompiler {
                     self.push_constant_without_op(param.0.as_str());
                 };
                 
-                let mut i = 0;
-                while i < stmts.len() {
-                    self.parse_byte(stmts[i].clone());
-                    i += 1;
+                // TODO(Scientific-Guy): Make a better way to gather chunk as bytecode instead of cloning and performing works.
+                let si = self.bytes.len();
+                for stmt in stmts {
+                    self.parse_byte(stmt.clone());
                 }
 
-                self.bytes.push(Opcode::BodyEnd as u8);
+                self.bytes.splice(si..si, ((self.bytes.len() - si) as u16).to_le_bytes().iter().cloned());
             },
             Identifier::Group(ident) => {
                 self.bytes.push(Opcode::Group as u8);
@@ -333,7 +341,6 @@ impl BytecodeCompiler {
                     self.bytes.extend_from_slice(&(i as u32).to_le_bytes());
                     return
                 }
-
                 self.bytes.extend_from_slice(&[Opcode::Short as u8, i as u8]);
                 return
             }

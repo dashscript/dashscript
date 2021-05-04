@@ -46,8 +46,6 @@ impl AST {
                                 self.get_function_body()?
                             }
                         );
-
-                        self.ci -= 1;
                     },
                     "async" => {
                         self.ci += 1;
@@ -67,8 +65,6 @@ impl AST {
                                 self.get_function_body()?
                             }
                         );
-
-                        self.ci -= 1;
                     },
                     "await" => res = Identifier::Await(Box::new(self.get_value("dserror(32): Expected a value to await.")?)),
                     _ => return Err(self.create_error(token.pos, "dserror(27): Illegal keyword to use as a value."))
@@ -87,7 +83,7 @@ impl AST {
                         _ => ()
                     }
 
-                    if self.current_token().val == TokenType::Punc(';') { continue }
+                    if self.tokens[if self.ci < self.len { self.ci } else { self.len - 1 }].val == TokenType::Punc(';') { continue }
                 },
                 TokenType::LogicalOperator(op) => {
                     match op.as_str() {

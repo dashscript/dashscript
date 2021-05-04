@@ -57,10 +57,18 @@ pub enum Instruction {
     Const(usize, u32, InstructionValue),
     Assign(usize, InstructionValue, u8, InstructionValue),
     Return(usize, InstructionValue),
-    Break(usize),
+    Break,
+    Continue(usize),
     While(usize, InstructionValue, Vec<u8>),
     Value(usize, InstructionValue),
     Condition(usize, Vec<(InstructionValue, Vec<u8>)>, Option<Vec<u8>>)
+}
+
+#[derive(Clone)]
+pub struct ReaderState {
+    pub ci: usize,
+    len: usize,
+    bytes: Vec<u8>
 }
 
 impl BytecodeReader {
@@ -83,72 +91,35 @@ impl BytecodeReader {
 
     pub fn parse_byte(&mut self, op: u8) -> Instruction {
         self.ci += 1;
-
         let instruction = match Opcode::from(op) {
             Opcode::Var => Instruction::Var(
-                self.ci-1,
+                self.ci - 1,
                 self.get_len_based_constant_idx(),
                 { 
-                    self.ci += 1;
-                    let op = Opcode::from(self.bytes[self.ci]);
-                    self.ci += 1;
-                    self.parse_value(op)
+                    self.ci += 2;
+                    self.parse_value(Opcode::from(self.bytes[self.ci - 1]))
                 }
             ),
             Opcode::Const => Instruction::Const(
-                self.ci-1,
+                self.ci - 1,
                 self.get_len_based_constant_idx(),
                 { 
-                    self.ci += 1;
-                    let op = Opcode::from(self.bytes[self.ci]);
-                    self.ci += 1;
-                    self.parse_value(op)
+                    self.ci += 2;
+                    self.parse_value(Opcode::from(self.bytes[self.ci - 1]))
                 }
             ),
-            Opcode::Return => Instruction::Return(self.ci-1, {
-                let op = Opcode::from(self.bytes[self.ci]);
+            Opcode::Return => Instruction::Return(self.ci - 1, {
                 self.ci += 1;
-                self.parse_value(op)
+                self.parse_value(Opcode::from(self.bytes[self.ci - 1]))
             }),
             Opcode::Assign => Instruction::Assign(
-                self.ci-1,
-                {
-                    let op = Opcode::from(self.bytes[self.ci]);
-                    self.ci += 1;
-                    self.parse_value(op)
-                },
-                {
-                    self.ci += 1;
-                    self.get_byte()
-                },
-                { 
-                    self.ci += 1;
-                    let op = Opcode::from(self.bytes[self.ci]);
-                    self.ci += 1;
-                    self.parse_value(op)
-                }
+                self.ci - 1,
+                { self.ci += 1; self.parse_value(Opcode::from(self.bytes[self.ci - 1])) },
+                { self.ci += 1; self.get_byte() },
+                { self.ci += 2; self.parse_value(Opcode::from(self.bytes[self.ci - 1])) }
             ),
-            Opcode::Break => Instruction::Break(self.ci-1),
-            Opcode::While => Instruction::While(self.ci-1, {
-                let op = Opcode::from(self.bytes[self.ci]);
-                self.ci += 1;
-                self.parse_value(op)
-            }, {
-                self.ci += 1;
-                let mut chunk = Vec::new();
-                loop {
-                    if self.ci < self.len {
-                        match Opcode::from(self.bytes[self.ci]) {
-                            Opcode::BodyEnd => break chunk,
-                            _ => chunk.push(self.bytes[self.ci])
-                        }
-    
-                        self.ci += 1;
-                    } else {
-                        break chunk;
-                    }
-                }
-            }),
+            Opcode::Break => Instruction::Break,
+            Opcode::Continue => Instruction::Continue(self.ci - 1),
             Opcode::Condition => {
                 let length = self.get_byte();
                 self.ci += 1;
@@ -156,44 +127,20 @@ impl BytecodeReader {
 
                 for _ in 0..length {
                     self.ci += 1;
-                    let val = self.parse_value(Opcode::from(self.bytes[self.ci-1]));
-                    let mut chunk = Vec::new();
+                    let val = self.parse_value(Opcode::from(self.bytes[self.ci - 1]));
                     self.ci += 1;
-                    
-                    main_chain.push((val, loop {
-                        if self.ci < self.len {
-                            match Opcode::from(self.bytes[self.ci]) {
-                                Opcode::BodyEnd => break chunk,
-                                _ => chunk.push(self.bytes[self.ci])
-                            }
-        
-                            self.ci += 1;
-                        } else {
-                            break chunk;
-                        }
-                    }));
-
+                    let start = self.ci + 1;
+                    self.ci += self.get_u16() as usize;
+                    main_chain.push((val, self.bytes.get(start..self.ci + 1).unwrap().to_vec()));
                     self.ci += 1;
                 }
 
                 return Instruction::Condition(self.ci, main_chain, match self.bytes.get(self.ci) {
                     Some(1) => {
-                        let mut chunk = Vec::new();
                         self.ci += 1;
-
-                        while self.ci < self.len {
-                            match Opcode::from(self.bytes[self.ci]) {
-                                Opcode::BodyEnd => {
-                                    self.ci += 1;
-                                    break
-                                },
-                                _ => chunk.push(self.bytes[self.ci])
-                            }
-        
-                            self.ci += 1;
-                        }
-                        
-                        Some(chunk)
+                        let start = self.ci + 1;
+                        self.ci += self.get_u16() as usize;  
+                        Some(self.bytes.get(start..self.ci + 1).unwrap().to_vec())
                     },
                     _ => {
                         self.ci += 1;
@@ -201,6 +148,15 @@ impl BytecodeReader {
                     }
                 })
             },
+            Opcode::While => Instruction::While(self.ci - 1, { 
+                self.ci += 1; 
+                self.parse_value(Opcode::from(self.bytes[self.ci - 1]))
+            }, {
+                self.ci += 1;
+                let start = self.ci + 1;
+                self.ci += self.get_u16() as usize;  
+                self.bytes.get(start..self.ci + 1).unwrap().to_vec()
+            }),
             opcode => Instruction::Value(self.ci, self.parse_value(opcode))
         };
 
@@ -211,33 +167,21 @@ impl BytecodeReader {
     pub fn parse_two_value(&mut self) -> (InstructionValue, InstructionValue) {
         (
             {
-                let op = Opcode::from(self.bytes[self.ci]);
                 self.ci += 1;
-                self.parse_value(op)
+                self.parse_value(Opcode::from(self.bytes[self.ci - 1]))
             },
             {
-                self.ci += 1;
-                let op = Opcode::from(self.bytes[self.ci]);
-                self.ci += 1;
-                self.parse_value(op)
+                self.ci += 2;
+                self.parse_value(Opcode::from(self.bytes[self.ci - 1]))
             }
         )
     }
 
     pub fn parse_value(&mut self, op: Opcode) -> InstructionValue {
         match op {
-            Opcode::True => {
-                self.ci -= 1;
-                InstructionValue::True
-            },
-            Opcode::False => {
-                self.ci -= 1;
-                InstructionValue::False
-            },
-            Opcode::Null => {
-                self.ci -= 1;
-                InstructionValue::Null
-            },
+            Opcode::True => { self.ci -= 1; InstructionValue::True },
+            Opcode::False => { self.ci -= 1; InstructionValue::False },
+            Opcode::Null => { self.ci -= 1; InstructionValue::Null },
             Opcode::Num => InstructionValue::Num(match self.bytes.get(self.ci..self.ci + MAX_BYTES) {
                 Some(bytes) => {
                     self.ci += MAX_BYTES - 1;
@@ -284,6 +228,7 @@ impl BytecodeReader {
                 let param_len = self.get_byte();
                 self.ci += 1;
                 let mut params = Vec::new();
+
                 for _ in 0..param_len {
                     match Opcode::from(self.bytes[self.ci]) {
                         Opcode::Short => {
@@ -304,24 +249,12 @@ impl BytecodeReader {
                     self.ci += 1;
                 }
 
-                let mut chunk = Vec::new();
-                while self.ci < self.len {
-                    match Opcode::from(self.bytes[self.ci]) {
-                        Opcode::BodyEnd => return InstructionValue::Func(name, params, chunk, is_async),
-                        _ => chunk.push(self.bytes[self.ci])
-                    }
-
-                    self.ci += 1;
-                }
-
-                InstructionValue::Func(name, params, chunk, is_async)
+                let start = self.ci + 1;
+                self.ci += self.get_u16() as usize;
+                InstructionValue::Func(name, params, self.bytes.get(start..self.ci + 1).unwrap().to_vec(), is_async)
             },
             Opcode::Call => InstructionValue::Call(
-                {
-                    let op = Opcode::from(self.bytes[self.ci]);
-                    self.ci += 1;
-                    Box::new(self.parse_value(op))
-                }, 
+                { self.ci += 1; Box::new(self.parse_value(Opcode::from(self.bytes[self.ci - 1]))) }, 
                 {
                     self.ci += 1;
                     let len = self.get_byte();
@@ -350,12 +283,7 @@ impl BytecodeReader {
                 InstructionValue::Ternary(
                     Box::new(a),
                     Box::new(b),
-                    Box::new({
-                        self.ci += 1;
-                        let op = Opcode::from(self.bytes[self.ci]);
-                        self.ci += 1;
-                        self.parse_value(op)
-                    })
+                    Box::new({ self.ci += 2; self.parse_value(Opcode::from(self.bytes[self.ci - 1])) })
                 )
             },
             Opcode::Array => {
@@ -499,6 +427,19 @@ impl BytecodeReader {
         }
     }
 
+    pub fn get_u16(&mut self) -> u16 {
+        match self.bytes.get(self.ci..self.ci + 2) {
+            Some(bytes) => {
+                self.ci += 1;
+                u16::from_le_bytes(bytes.try_into().unwrap())
+            },
+            None => {
+                println!("CompilerError: Dislocated bytes.\n    Expected 2 bytes to generate a u16 but failed.");
+                std::process::exit(0);
+            }
+        }
+    }
+
     pub fn get_position(&self, ci: usize) -> Position {
         let mut result = Position::default();
         for pos in self.pos_map.iter() {
@@ -514,6 +455,20 @@ impl BytecodeReader {
 
     pub fn get_constant(&self, id: usize) -> String {
         self.constants[id].clone()
+    }
+
+    pub fn update_state(&mut self, state: ReaderState) {
+        self.len = state.len;
+        self.ci = state.ci;
+        self.bytes = state.bytes;
+    }
+
+    pub fn get_state(&self) -> ReaderState {
+        ReaderState {
+            len: self.len,
+            ci: self.ci,
+            bytes: self.bytes.clone()
+        }
     }
 
 }

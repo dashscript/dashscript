@@ -1,7 +1,7 @@
 use std::env;
 use std::collections::HashMap;
 use std::fmt;
-use super::value::{ Value, ValueRegister, ValueIndex };
+use super::value::{ Value, ValueRegister, ValueIndex, ControlFlow };
 use super::vmcore::{ self, builtin, window, result, memory, into_value_dict, math, date, builtin::inspect };
 use crate::lexer::parser::Position;
 use crate::bytecode::reader::LogicalOperator;
@@ -32,15 +32,29 @@ impl fmt::Display for RuntimeError {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Frame {
+    pub vi: usize,
+    pub name: String
+}
+
+impl Frame {
+    pub fn new(name: String, vm: &mut VM) -> Self {
+        Self {
+            vi: vm.value_register.len(),
+            name
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct VM {
     pub pos_map: Vec<(usize, Position)>,
     pub filename: String,
     pub reader: BytecodeReader,
-    pub call_stack: Vec<String>,
+    pub frames: Vec<Frame>,
     pub value_stack: Vec<Value>,
     pub value_register: Vec<ValueRegister>,
-    pub current_depth: u16,
     pub body_line_data: Vec<usize>,
     pub permissions: Vec<String>
 }
@@ -52,10 +66,12 @@ impl VM {
             pos_map: compiler.pos_map.clone(),
             filename: filename,
             reader: BytecodeReader::new(compiler),
-            call_stack: Vec::new(),
+            frames: vec![Frame {
+                name: "@runtime".to_string(),
+                vi: 0
+            }],
             value_stack: Vec::<Value>::new(),
             value_register: Vec::new(),
-            current_depth: 0,
             body_line_data: Vec::new(),
             permissions
         };
@@ -74,10 +90,12 @@ impl VM {
             pos_map: Vec::new(),
             filename,
             reader: BytecodeReader::default(),
-            call_stack: Vec::new(),
+            frames: vec![Frame {
+                name: "@runtime".to_string(),
+                vi: 0
+            }],
             value_stack: Vec::<Value>::new(),
             value_register: Vec::new(),
-            current_depth: 0,
             body_line_data: Vec::new(),
             permissions
         }
@@ -85,8 +103,7 @@ impl VM {
 
     pub fn execute_body(&mut self) -> Result<(), RuntimeError> {
         let mut instruction = Some(self.reader.init());
-        self.current_depth += 1;
-
+        
         while instruction.is_some() {
             self.execute_instruction(instruction.unwrap())?;
             instruction = self.reader.next();
@@ -119,74 +136,19 @@ impl VM {
                 Ok(())
             },
             Instruction::Condition(pos, main_chain, else_chunk) => {
-                for (instruction_value, chunk) in main_chain {
-                    if builtin::bool(self.execute_value(instruction_value, pos)?) {
-                        let mut reader = self.reader.clone();
-                        reader.pos_map.clear();
-                        reader.ci = 0;
-                        reader.len = chunk.len();
-                        reader.bytes = chunk.clone();
-                        self.current_depth += 1;
-
-                        while reader.ci+1 < reader.len {
-                            self.execute_instruction(reader.parse_byte(chunk[reader.ci]))?;
-                        }
-
-                        self.current_depth -= 1;
-                        return Ok(());
-                    }
-                }
-
-                if else_chunk.is_some() {
-                    let mut reader = self.reader.clone();
-                    let chunk = else_chunk.unwrap();
-                    reader.pos_map.clear();
-                    reader.ci = 0;
-                    reader.len = chunk.len();
-                    reader.bytes = chunk.clone();
-                    self.current_depth += 1;
-
-                    while reader.ci+1 < reader.len {
-                        self.execute_instruction(reader.parse_byte(chunk[reader.ci]))?;
-                    }
-
-                    self.current_depth -= 1;
-                }
-
+                self.execute_condition_chain(main_chain, else_chunk, pos)?;
                 Ok(())
             },
-            // TODO(Scientific-Guy): Make a better execution for the while loop.
             Instruction::While(pos, condition, chunk) => {
-                let mut instructions = Vec::new();
-                let mut reader = self.reader.clone();
-                reader.pos_map.clear();
-                reader.ci = 0;
-                reader.len = chunk.len();
-                reader.bytes = chunk.clone();
-                self.current_depth += 1;
-
-                while reader.ci < reader.len {
-                    instructions.push(reader.parse_byte(reader.bytes[reader.ci]));
-                }
-
-                while builtin::bool(self.execute_value(condition.clone(), pos)?) {
-                    for instruction in &instructions {
-                        if let Instruction::Break(_) = instruction {
-                            return Ok(());
-                        } else {
-                            self.execute_instruction(instruction.clone())?;
-                        }
-                    }
-                }
-
-                self.current_depth -= 1;
+                self.execute_while_loop(condition, chunk, pos)?;
                 Ok(())
             },
             Instruction::Return(pos, val) => {
                 println!("{}", builtin::inspect(self.execute_value(val, pos)?, self));
                 std::process::exit(0);
             },
-            Instruction::Break(_) => std::process::exit(0)
+            Instruction::Break => std::process::exit(0),
+            Instruction::Continue(_) => return Ok(())
         }
     }
 
@@ -432,9 +394,9 @@ impl VM {
 
                 match call_body {
                     Value::NativeFn(this, func) => {
-                        self.call_stack.push("NativeFunction".to_string());
+                        self.create_frame("NativeFunction".to_string());
                         let res = Ok(func(*this, call_params, self));
-                        self.call_stack.pop();
+                        self.frames.pop();
                         res
                     },
                     Value::Func(id, params, chunk, _) => self.execute_func(id, params, call_params, chunk),
@@ -465,7 +427,7 @@ impl VM {
             }),
             InstructionValue::Func(id, params, chunk, is_async) => {
                 let name = self.reader.get_constant(id as usize);
-                let val = Value::Func(id, params, chunk, is_async);
+                let val = Value::Func(id, params, chunk.clone(), is_async);
                 if name != "anonymous".to_string() {
                     self.add_value(name, val.clone(), false)
                 }
@@ -556,16 +518,13 @@ impl VM {
         params: Vec<Value>,
         chunk: Vec<u8>
     ) -> Result<Value, RuntimeError> {
-        self.call_stack.push(self.reader.get_constant(id as usize));
-        self.current_depth += 1;
+        self.create_frame(self.reader.get_constant(id as usize));
 
         // TODO(Scientific-Guy): Make a better chunk reader instead of cloning the reader.
-        let mut reader = self.reader.clone();
-        // Cleaning to prevent unwanted cache.
-        reader.pos_map.clear();
-        reader.len = chunk.len();
-        reader.ci = 0;
-        reader.bytes = chunk;
+        let state = self.reader.get_state();
+        self.reader.len = chunk.len();
+        self.reader.ci = 0;
+        self.reader.bytes = chunk;
 
         for i in 0..param_ids.len() {
             let val = {
@@ -594,18 +553,178 @@ impl VM {
         }
 
         // TODO(Scientific-Guy): Prevent unwated bytes to overlap the function code.
-        while (reader.ci + 1) < reader.len {
-            match reader.parse_byte(reader.bytes[reader.ci]) {
-                Instruction::Return(pos, val) => return self.execute_value(val, pos),
+        while self.reader.ci < self.reader.len {
+            match self.reader.parse_byte(self.reader.bytes[self.reader.ci]) {
+                Instruction::Return(pos, val) => {
+                    let val = self.execute_value(val, pos);
+                    self.reader.update_state(state.clone());
+                    self.remove_frame();
+                    return val;
+                },
+                Instruction::While(pos, condition, range) => {
+                    if let Some(val) = self.execute_while_loop(condition, range, pos)? { 
+                        self.reader.update_state(state);
+                        self.remove_frame();
+                        return Ok(val) 
+                    }
+                },
+                Instruction::Condition(pos, main_chain, else_chunk) => {
+                    if let ControlFlow::Return(val) = self.execute_condition_chain(main_chain, else_chunk, pos)? { 
+                        self.reader.update_state(state);
+                        self.remove_frame();
+                        return Ok(val);
+                    }
+                },
                 instruction => {
                     self.execute_instruction(instruction)?;
                 }
             }
         }
 
-        self.call_stack.pop();
-        self.current_depth -= 1;
+        self.reader.update_state(state);
+        self.remove_frame();
         Ok(Value::Null)
+    }
+
+    pub fn execute_while_loop(
+        &mut self,
+        condition: InstructionValue,
+        chunk: Vec<u8>,
+        pos: usize
+    ) -> Result<Option<Value>, RuntimeError> {
+        let mut instructions = Vec::new();
+        let state = self.reader.get_state();
+        self.reader.ci = 0;
+        self.reader.len = chunk.len();
+        self.reader.bytes = chunk.clone();
+        self.create_frame("@while".to_string());
+
+        while self.reader.ci < self.reader.len {
+            instructions.push(self.reader.parse_byte(self.reader.bytes[self.reader.ci]));
+        }
+
+        while builtin::bool(self.execute_value(condition.clone(), pos)?) {
+            for instruction in &instructions {
+                match instruction {
+                    Instruction::Break => return Ok(None),
+                    Instruction::Continue(_) => continue,
+                    Instruction::Return(pos, value) => return Ok(Some(self.execute_value(value.clone(), *pos)?)),
+                    Instruction::While(pos, condition, chunk) => {
+                        if let Some(val) = self.execute_while_loop(condition.clone(), chunk.clone(), *pos)? { return Ok(Some(val)) }
+                        self.reader.ci += 1;
+                    },
+                    _ => {
+                        self.execute_instruction(instruction.clone())?;
+                    }
+                }
+            }
+        }
+
+        self.frames.pop();
+        self.reader.update_state(state);
+        Ok(None)
+    }
+
+    pub fn execute_condition_chain(
+        &mut self,
+        main_chain: Vec<(InstructionValue, Vec<u8>)>,
+        else_chunk: Option<Vec<u8>>,
+        pos: usize
+    ) -> Result<ControlFlow, RuntimeError> {
+        for (instruction_value, chunk) in main_chain {
+            if builtin::bool(self.execute_value(instruction_value, pos)?) {
+                let state = self.reader.get_state();
+                self.reader.ci = 0;
+                self.reader.len = chunk.len();
+                self.reader.bytes = chunk;
+                self.create_frame("@condition".to_string());
+
+                while self.reader.ci < self.reader.len {
+                    match self.reader.parse_byte(self.reader.bytes[self.reader.ci]) {
+                        Instruction::Break => {
+                            self.reader.update_state(state);
+                            self.remove_frame();
+                            return Ok(ControlFlow::Break);
+                        },
+                        Instruction::Return(pos, val) => {
+                            self.reader.update_state(state);
+                            self.remove_frame();
+                            return Ok(ControlFlow::Return(self.execute_value(val, pos)?));
+                        },
+                        Instruction::While(pos, condition, chunk) => {
+                            if let Some(val) = self.execute_while_loop(condition, chunk, pos)? {
+                                self.reader.update_state(state);
+                                self.remove_frame();
+                                return Ok(ControlFlow::Return(val));
+                            }
+                        },
+                        Instruction::Condition(pos, main_chain, else_chunk) => {
+                            match self.execute_condition_chain(main_chain, else_chunk, pos)? {
+                                ControlFlow::None => (),
+                                val => {
+                                    self.reader.update_state(state);
+                                    self.remove_frame();
+                                    return Ok(val);
+                                }
+                            }
+                        },
+                        instruction => self.execute_instruction(instruction)?
+                    }
+                }
+
+                self.reader.update_state(state);
+                self.remove_frame();
+                return Ok(ControlFlow::None);
+            }
+        }
+
+        if else_chunk.is_some() {
+            let chunk = else_chunk.unwrap();
+            let state = self.reader.get_state();
+            self.reader.ci = 0;
+            self.reader.len = chunk.len();
+            self.reader.bytes = chunk;
+            self.create_frame("@condition".to_string());
+
+            while self.reader.ci < self.reader.len {
+                match self.reader.parse_byte(self.reader.bytes[self.reader.ci]) {
+                    Instruction::Break => {
+                        self.reader.update_state(state);
+                        self.remove_frame();
+                        return Ok(ControlFlow::Break);
+                    },
+                    Instruction::Return(pos, val) => {
+                        self.reader.update_state(state);
+                        self.remove_frame();
+                        return Ok(ControlFlow::Return(self.execute_value(val, pos)?));
+                    },
+                    Instruction::While(pos, condition, chunk) => {
+                        if let Some(val) = self.execute_while_loop(condition, chunk, pos)? {
+                            self.reader.update_state(state);
+                            self.remove_frame();
+                            return Ok(ControlFlow::Return(val));
+                        }
+                    },
+                    Instruction::Condition(pos, main_chain, else_chunk) => {
+                        match self.execute_condition_chain(main_chain, else_chunk, pos)? {
+                            ControlFlow::None => (),
+                            val => {
+                                self.reader.update_state(state);
+                                self.remove_frame();
+                                return Ok(val);
+                            }
+                        }
+                    },
+                    instruction => self.execute_instruction(instruction)?
+                }
+            }
+
+            self.remove_frame();
+            self.reader.update_state(state);
+            return Ok(ControlFlow::None);
+        }
+
+        Ok(ControlFlow::None)
     }
 
     pub fn add_value(&mut self, name: String, val: Value, mutable: bool) {
@@ -613,7 +732,7 @@ impl VM {
         self.value_register.push(ValueRegister {
             key: name,
             id: self.value_stack.len() as u32 - 1,
-            depth: self.current_depth,
+            depth: self.frames.len() as u32,
             mutable
         });
     }
@@ -698,7 +817,7 @@ impl VM {
         let (line, col) = get_line_col_by_line_data(self.body_line_data.clone(), pos.start);
 
         RuntimeError {
-            call_frames: self.call_stack.clone(),
+            call_frames: self.get_stack_trace(),
             start: pos.start,
             end: pos.end,
             line,
@@ -708,36 +827,61 @@ impl VM {
         }
     }
 
+    pub fn create_frame(&mut self, name: String) {
+        self.frames.push(Frame {
+            name,
+            vi: self.value_register.len()
+        })
+    }
+
+    pub fn remove_frame(&mut self) {
+        self.value_register = self.value_register.splice(..self.frames.last().unwrap().vi, [].iter().cloned()).collect();
+        self.frames.pop();
+    }
+
+    pub fn get_stack_trace(&self) -> Vec<String> {
+        if self.permissions.contains(&"deep-stack-trace".to_string()) {
+            self.frames.iter()
+            .map(|x| x.name.clone())
+            .collect()
+        } else {
+            self.frames.iter()
+            .filter(|x| !x.name.starts_with("@"))
+            .map(|x| x.name.clone())
+            .collect()
+        }
+    }
+
     pub fn get_value(&mut self, id: u32) -> Value {
         let mut i = self.value_register.len() - 1;
         let key = self.reader.get_constant(id as usize);
+        let depth = self.frames.len() as u32;
 
         loop {
             let value = self.value_register[i].clone();
-            if value.key == key && (value.depth <= self.current_depth) {
+            if (value.key == key) && (value.depth <= depth) {
                 return self.value_stack[value.id as usize].clone();
             }
-            
-            if i == 0 { break }
+
+            if i == 0 { return Value::Null }
             i -= 1;
         }
-
-        Value::Null
     }
 
     pub fn get_value_register(&mut self, id: u32) -> Result<ValueRegister, RuntimeError> {
         let mut i = self.value_register.len() - 1;
         let key = self.reader.get_constant(id as usize);
+        let depth = self.frames.len() as u32 - 1;
 
         loop {
             let value = self.value_register[i].clone();
-            if value.key == key && (value.depth <= self.current_depth) {
-                return Ok(value)
+            if (value.key == key) && (value.depth <= depth) {
+                return Ok(value);
             }
-            
+
             if i == 0 {
-                break Err(self.create_error(
-                    format!("ExpectedValueStack: Expected an valye stack for {}.", key),
+                return Err(self.create_error(
+                    format!("ExpectedValueStack: Expected an value stack for {}.", key),
                     self.reader.ci
                 ))
             }

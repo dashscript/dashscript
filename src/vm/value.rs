@@ -54,6 +54,22 @@ pub enum Value {
     Null
 }
 
+impl From<bool> for Value { 
+    fn from(bool: bool) -> Self { Self::Boolean(bool) } 
+}
+
+impl From<fsize> for Value { 
+    fn from(num: fsize) -> Self { Self::Num(num) } 
+}
+
+impl From<String> for Value {
+    fn from(str: String) -> Self { Self::Str(str) }
+}
+
+impl From<NativeFn> for Value {
+    fn from(func: NativeFn) -> Self { Self::NativeFn(Box::new(Value::Null), func) }
+}
+
 impl Default for Value {
     fn default() -> Self { Value::Null }
 }
@@ -120,16 +136,16 @@ impl Value {
 
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ValueRegister {
     pub key: String,
     pub id: u32,
-    pub depth: u16,
-    pub mutable: bool
+    pub mutable: bool,
+    pub depth: u32
 }
 
-impl ValueRegister {
-    pub fn update_id(&mut self, id: u32) {
-        self.id = id;
-    }
+pub enum ControlFlow {
+    Break,
+    Return(Value),
+    None
 }
