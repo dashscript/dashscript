@@ -78,13 +78,13 @@ pub fn inspect_tiny(val: Value) -> String {
 pub fn panic(message: String, vm: &mut VM) -> ! {
     let mut address = String::new();
 
-    for frame in vm.call_stack.clone().into_iter().rev() {
+    for frame in vm.get_stack_trace().into_iter().rev() {
         address += &format!("    at {}\n", frame).to_string();
     }
 
     let (line, col) = get_line_col_by_line_data(vm.body_line_data.clone(), vm.reader.ci);
     println!("{} ({}:{}:{})\n{}", message, vm.filename, line, col, address);
-    std::process::exit(0)
+    std::process::exit(1)
 }
 
 pub fn print_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {

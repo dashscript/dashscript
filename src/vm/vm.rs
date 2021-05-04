@@ -32,15 +32,29 @@ impl fmt::Display for RuntimeError {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Frame {
+    pub vi: usize,
+    pub name: String
+}
+
+impl Frame {
+    pub fn new(name: String, vm: &mut VM) -> Self {
+        Self {
+            vi: vm.value_register.len(),
+            name
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct VM {
     pub pos_map: Vec<(usize, Position)>,
     pub filename: String,
     pub reader: BytecodeReader,
-    pub call_stack: Vec<String>,
+    pub frames: Vec<Frame>,
     pub value_stack: Vec<Value>,
     pub value_register: Vec<ValueRegister>,
-    pub current_depth: u16,
     pub body_line_data: Vec<usize>,
     pub permissions: Vec<String>
 }
@@ -52,10 +66,12 @@ impl VM {
             pos_map: compiler.pos_map.clone(),
             filename: filename,
             reader: BytecodeReader::new(compiler),
-            call_stack: Vec::new(),
+            frames: vec![Frame {
+                name: "@runtime".to_string(),
+                vi: 0
+            }],
             value_stack: Vec::<Value>::new(),
             value_register: Vec::new(),
-            current_depth: 0,
             body_line_data: Vec::new(),
             permissions
         };
@@ -74,10 +90,12 @@ impl VM {
             pos_map: Vec::new(),
             filename,
             reader: BytecodeReader::default(),
-            call_stack: Vec::new(),
+            frames: vec![Frame {
+                name: "@runtime".to_string(),
+                vi: 0
+            }],
             value_stack: Vec::<Value>::new(),
             value_register: Vec::new(),
-            current_depth: 0,
             body_line_data: Vec::new(),
             permissions
         }
@@ -85,7 +103,6 @@ impl VM {
 
     pub fn execute_body(&mut self) -> Result<(), RuntimeError> {
         let mut instruction = Some(self.reader.init());
-        self.current_depth += 1;
         
         while instruction.is_some() {
             self.execute_instruction(instruction.unwrap())?;
@@ -377,9 +394,9 @@ impl VM {
 
                 match call_body {
                     Value::NativeFn(this, func) => {
-                        self.call_stack.push("NativeFunction".to_string());
+                        self.create_frame("NativeFunction".to_string());
                         let res = Ok(func(*this, call_params, self));
-                        self.call_stack.pop();
+                        self.frames.pop();
                         res
                     },
                     Value::Func(id, params, chunk, _) => self.execute_func(id, params, call_params, chunk),
@@ -410,11 +427,11 @@ impl VM {
             }),
             InstructionValue::Func(id, params, chunk, is_async) => {
                 let name = self.reader.get_constant(id as usize);
-                let val = Value::Func(id, params, chunk, is_async);
+                let val = Value::Func(id, params, chunk.clone(), is_async);
                 if name != "anonymous".to_string() {
                     self.add_value(name, val.clone(), false)
                 }
-                
+
                 Ok(val)
             },
             InstructionValue::Invert(ident) => {
@@ -501,9 +518,7 @@ impl VM {
         params: Vec<Value>,
         chunk: Vec<u8>
     ) -> Result<Value, RuntimeError> {
-        self.call_stack.push(self.reader.get_constant(id as usize));
-        self.current_depth += 1;
-
+        self.create_frame(self.reader.get_constant(id as usize));
         // TODO(Scientific-Guy): Make a better chunk reader instead of cloning the reader.
         let state = self.reader.get_state();
         self.reader.len = chunk.len();
@@ -563,8 +578,6 @@ impl VM {
         }
 
         self.reader.update_state(state);
-        self.call_stack.pop();
-        self.current_depth -= 1;
         Ok(Value::Null)
     }
 
@@ -579,7 +592,7 @@ impl VM {
         self.reader.ci = 0;
         self.reader.len = chunk.len();
         self.reader.bytes = chunk.clone();
-        self.current_depth += 1;
+        self.create_frame("@while".to_string());
 
         while self.reader.ci < self.reader.len {
             instructions.push(self.reader.parse_byte(self.reader.bytes[self.reader.ci]));
@@ -602,7 +615,7 @@ impl VM {
             }
         }
 
-        self.current_depth -= 1;
+        self.frames.pop();
         self.reader.update_state(state);
         Ok(None)
     }
@@ -619,7 +632,7 @@ impl VM {
                 self.reader.ci = 0;
                 self.reader.len = chunk.len();
                 self.reader.bytes = chunk;
-                self.current_depth += 1;
+                self.create_frame("@condition".to_string());
 
                 while self.reader.ci < self.reader.len {
                     match self.reader.parse_byte(self.reader.bytes[self.reader.ci]) {
@@ -635,7 +648,7 @@ impl VM {
                     }
                 }
 
-                self.current_depth -= 1;
+                self.frames.pop();
                 self.reader.update_state(state);
                 return Ok(Break::None);
             }
@@ -647,7 +660,7 @@ impl VM {
             self.reader.ci = 0;
             self.reader.len = chunk.len();
             self.reader.bytes = chunk;
-            self.current_depth += 1;
+            self.create_frame("@condition".to_string());
 
             while self.reader.ci < self.reader.len {
                 match self.reader.parse_byte(self.reader.bytes[self.reader.ci]) {
@@ -657,7 +670,7 @@ impl VM {
                 }
             }
 
-            self.current_depth -= 1;
+            self.frames.pop();
             self.reader.update_state(state);
             return Ok(Break::None);
         }
@@ -670,7 +683,6 @@ impl VM {
         self.value_register.push(ValueRegister {
             key: name,
             id: self.value_stack.len() as u32 - 1,
-            depth: self.current_depth,
             mutable
         });
     }
@@ -755,7 +767,7 @@ impl VM {
         let (line, col) = get_line_col_by_line_data(self.body_line_data.clone(), pos.start);
 
         RuntimeError {
-            call_frames: self.call_stack.clone(),
+            call_frames: self.get_stack_trace(),
             start: pos.start,
             end: pos.end,
             line,
@@ -765,17 +777,36 @@ impl VM {
         }
     }
 
+    pub fn create_frame(&mut self, name: String) {
+        self.frames.push(Frame {
+            name,
+            vi: self.value_register.len()
+        })
+    }
+
+    pub fn get_stack_trace(&self) -> Vec<String> {
+        if self.permissions.contains(&"deep-stack-trace".to_string()) {
+            self.frames.iter()
+            .map(|x| x.name.clone())
+            .collect()
+        } else {
+            self.frames.iter()
+            .filter(|x| !x.name.starts_with("@"))
+            .map(|x| x.name.clone())
+            .collect()
+        }
+    }
+
     pub fn get_value(&mut self, id: u32) -> Value {
         let mut i = self.value_register.len() - 1;
         let key = self.reader.get_constant(id as usize);
 
-        loop {
+        while i >= self.frames.last().unwrap().vi {
             let value = self.value_register[i].clone();
-            if value.key == key && (value.depth <= self.current_depth) {
+            if value.key == key {
                 return self.value_stack[value.id as usize].clone();
             }
-            
-            if i == 0 { break }
+
             i -= 1;
         }
 
@@ -786,21 +817,19 @@ impl VM {
         let mut i = self.value_register.len() - 1;
         let key = self.reader.get_constant(id as usize);
 
-        loop {
+        while i >= self.frames.last().unwrap().vi {
             let value = self.value_register[i].clone();
-            if value.key == key && (value.depth <= self.current_depth) {
-                return Ok(value)
-            }
-            
-            if i == 0 {
-                break Err(self.create_error(
-                    format!("ExpectedValueStack: Expected an value stack for {}.", key),
-                    self.reader.ci
-                ))
+            if value.key == key {
+                return Ok(value);
             }
 
             i -= 1;
         }
+
+        return Err(self.create_error(
+            format!("ExpectedValueStack: Expected an value stack for {}.", key),
+            self.reader.ci
+        ))
     }
 
 }
