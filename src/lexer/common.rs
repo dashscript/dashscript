@@ -27,7 +27,8 @@ impl Lexer {
             if char == pref {
                 return Ok(Token::new(TokenType::String(content), start.update(self)));
             } else if char == '\\' {
-                content += &resolve_escape_char(char).to_string();
+                content += &resolve_escape_char(*self.chars.get(self.ci + 1).unwrap_or(&'\\')).to_string();
+                self.ci += 1;
             } else {
                 content += &char.to_string();
             }
