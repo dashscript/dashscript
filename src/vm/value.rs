@@ -136,7 +136,7 @@ impl Value {
 
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ValueRegister {
     pub key: String,
     pub id: u32,
@@ -144,17 +144,8 @@ pub struct ValueRegister {
     pub depth: u32
 }
 
-pub enum Break {
+pub enum ControlFlow {
     Break,
     Return(Value),
     None
-}
-
-impl Break {
-    pub fn is_some(&self) -> bool {
-        match self {
-            Break::None => true,
-            _ => false
-        }
-    }
 }
