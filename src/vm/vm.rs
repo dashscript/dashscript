@@ -117,12 +117,28 @@ impl VM {
             Instruction::Var(pos, name, value) => {
                 let name = self.reader.get_constant(name as usize);
                 let value = self.execute_value(value, pos)?;
+                
+                if self.value_exists(name.clone()) {
+                    return Err(self.create_error(
+                        format!("AssignmentError: Identifier {} has already declared.", name),
+                        pos
+                    ))
+                }
+
                 self.add_value(name, value, true);
                 Ok(())
             },
             Instruction::Const(pos, name, value) => {
                 let name = self.reader.get_constant(name as usize);
                 let value = self.execute_value(value, pos)?;
+                
+                if self.value_exists(name.clone()) {
+                    return Err(self.create_error(
+                        format!("AssignmentError: Identifier {} has already declared.", name),
+                        pos
+                    ))
+                }
+
                 self.add_value(name, value, false);
                 Ok(())
             },
@@ -897,6 +913,21 @@ impl VM {
             }
 
             if i == 0 { return Value::Null }
+            i -= 1;
+        }
+    }
+
+    pub fn value_exists(&self, key: String) -> bool {
+        let mut i = self.value_register.len() - 1;
+        let depth = self.frames.len() as u32;
+
+        loop {
+            let value = self.value_register[i].clone();
+            if (value.key == key) && (value.depth <= depth) {
+                return true;
+            }
+
+            if i == 0 { return false }
             i -= 1;
         }
     }
