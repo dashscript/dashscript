@@ -3,7 +3,8 @@ use std::env::VarError;
 use std::collections::HashMap;
 use std::time::Duration;
 use std::thread;
-use crate::vm::{ value::{ Value, ValueIndex }, vm::VM };
+use crate::vm::vm::VM;
+use crate::vm::value::{ Value, ValueIndex, Dict };
 use super::builtin::{ inspect, panic, inspect_tiny };
 use super::result::{ ok, err };
 use super::into_value_dict;
@@ -75,15 +76,14 @@ pub fn delete_env_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     Value::Null
 }
 
-pub fn all_env_api(_this: Value, _args: Vec<Value>, vm: &mut VM) -> Value {
+pub fn all_env_api(_this: Value, _args: Vec<Value>, _vm: &mut VM) -> Value {
     let mut entries = HashMap::new();
 
     for var in env::vars() {
-        vm.value_stack.push(Value::Str(var.1));
-        entries.insert(ValueIndex::Str(var.0), (vm.value_stack.len() as u32 - 1, true));
+        entries.insert(ValueIndex::Str(var.0), (Value::Str(var.1), true));
     }
 
-    Value::Dict(entries)
+    Value::Dict(Dict::Map(entries, None))
 }
 
 pub fn sleep_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {

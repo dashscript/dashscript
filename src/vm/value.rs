@@ -1,3 +1,4 @@
+use std::fmt;
 use std::collections::HashMap;
 use std::hash::{ Hash, Hasher };
 use crate::common::{ fsize, MAX_BYTES };
@@ -44,7 +45,7 @@ pub enum Value {
     Boolean(bool),
     Str(String),
     Num(fsize),
-    Dict(HashMap<ValueIndex, (u32, bool)>),
+    Dict(Dict),
     // TODO(Scientific-Guy): Think a better way for native functions.
     NativeFn(Box<Value>, NativeFn),
     // Array is used as a value type instead of an object because to prevent unwanted memory of attributes in value register.
@@ -82,7 +83,7 @@ impl PartialEq for Value {
             (Value::Boolean(a), Value::Boolean(b)) => a == b,
             (Value::Func(_, _, a, _), Value::Func(_, _, b, _)) => a == b,
             (Value::NativeFn(_, a), Value::NativeFn(_, b)) => a as *const NativeFn == b as *const NativeFn,
-            (Value::Dict(a), Value::Dict(b)) => a == b,
+            (Value::Dict(a), Value::Dict(b)) => a.pointer() == b.pointer(),
             (Value::Null, Value::Null) => true,
             _ => false
         }
@@ -90,6 +91,23 @@ impl PartialEq for Value {
 }
 
 impl Eq for Value {}
+
+impl fmt::Debug for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            Value::Str(str) => format!("\"{}\"", str),
+            Value::Num(num) => num.to_string(),
+            Value::Boolean(bool) => bool.to_string(),
+            Value::Null => "null".to_string(),
+            Value::Dict(Dict::Map(_, Some(id))) => format!("[Object(Map({}))]", id),
+            Value::Dict(Dict::Map(_, None)) => format!("[Object(Map)]"),
+            Value::Dict(Dict::Ref(id)) => format!("[Object(Ref({}))]", id),
+            Value::Array(_) => "[Array]".to_string(),
+            Value::Func(_, _, _, _)  => "[Function]".to_string(),
+            Value::NativeFn(_, _) => "[NativeFunction]".to_string()
+        })
+    }
+}
 
 impl Value {
 
@@ -134,6 +152,32 @@ impl Value {
         }
     }
 
+    pub fn to_pointer_value(&self, pointer: u32) -> Value {
+        match self {
+            Value::Dict(dict) => Value::Dict(match dict.clone() {
+                Dict::Map(entries, None) => Dict::Map(entries, Some(pointer)),
+                Dict::Map(_, Some(id)) => Dict::Ref(id),
+                dict => dict
+            }),
+            value => value.clone()
+        }
+    }
+
+    pub fn borrow(&self, vm: &mut VM) -> Value {
+        match self {
+            Value::Dict(dict) => Value::Dict(match dict.clone() {
+                Dict::Map(entries, None) => {
+                    let val = Value::Dict(Dict::Map(entries, Some(vm.value_stack.len() as u32 + 1)));
+                    vm.value_stack.push(val.clone());
+                    return val;
+                },
+                Dict::Map(_, Some(id)) => Dict::Ref(id),
+                dict => dict
+            }),
+            value => value.clone()
+        }
+    }
+
 }
 
 #[derive(Clone, Debug)]
@@ -148,4 +192,31 @@ pub enum ControlFlow {
     Break,
     Return(Value),
     None
+}
+
+#[derive(Clone)]
+pub enum Dict {
+    Map(HashMap<ValueIndex, (Value, bool)>, Option<u32>),
+    Ref(u32)
+}
+
+impl Dict {
+
+    pub fn pointer(&self) -> Option<u32> {
+        match self {
+            Dict::Map(_, id) => *id,
+            Dict::Ref(id) => Some(*id)
+        }
+    }
+
+    pub fn entries(&self, vm: &mut VM) -> HashMap<ValueIndex, (Value, bool)> {
+        match self {
+            Dict::Map(entries, _) => entries.clone(),
+            Dict::Ref(id) => match vm.value_stack[*id as usize].clone() {
+                Value::Dict(dict) => dict.entries(vm),
+                _ => HashMap::new()
+            }
+        }
+    }
+
 }

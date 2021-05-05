@@ -34,7 +34,7 @@ pub fn inspect(val: Value, vm: &mut VM) -> String {
         Value::Dict(dict) => {
             let mut content = "{\n".to_string();
 
-            for entry in dict.iter() {
+            for entry in dict.entries(vm).iter() {
                 content += &format!(
                     "    {}: {},\n", 
                     match entry.0 {
@@ -43,7 +43,7 @@ pub fn inspect(val: Value, vm: &mut VM) -> String {
                         ValueIndex::Null => "[null]".to_string(),
                         ValueIndex::Num(num) => num.0.to_string()
                     }, 
-                    inspect_tiny(vm.value_stack[entry.1.0 as usize].clone())
+                    inspect_tiny(entry.1.0.clone())
                 ).to_owned()
             }
 

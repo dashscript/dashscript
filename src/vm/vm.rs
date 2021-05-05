@@ -1,7 +1,7 @@
 use std::env;
 use std::collections::HashMap;
 use std::fmt;
-use super::value::{ Value, ValueRegister, ValueIndex, ControlFlow };
+use super::value::{ Value, ValueRegister, ValueIndex, ControlFlow, Dict };
 use super::vmcore::{ self, builtin, window, result, memory, into_value_dict, math, date, builtin::inspect };
 use crate::lexer::parser::Position;
 use crate::bytecode::reader::LogicalOperator;
@@ -157,7 +157,7 @@ impl VM {
         &mut self, 
         value: InstructionValue, 
         pos: usize, 
-        val: Value,
+        mut val: Value,
         op: u8,
         last_stack: bool,
         id: u32
@@ -174,12 +174,13 @@ impl VM {
                         ))
                     }
 
-                    match op {
-                        0 => self.value_stack[old_val.id as usize] = val,
-                        1 => self.value_stack[old_val.id as usize] = vmcore::add_values(self.value_stack[old_val.id as usize].clone(), val),
-                        2 => self.value_stack[old_val.id as usize] = vmcore::sub_values(self.value_stack[old_val.id as usize].clone(), val, self),
-                        _ => ()
-                    }
+                    val = val.borrow(self);
+                    self.value_stack[old_val.id as usize] = match op {
+                        0 => val,
+                        1 => vmcore::add_values(self.value_stack[old_val.id as usize].clone(), val),
+                        2 => vmcore::sub_values(self.value_stack[old_val.id as usize].clone(), val, self),
+                        _ => Value::Null
+                    }.to_pointer_value(old_val.id);
 
                     Ok(0)
                 } else {
@@ -187,55 +188,77 @@ impl VM {
                 }
             },
             InstructionValue::Attr(raw_target, raw_attr) => {
-                let target_id = self.execute_assignment(*raw_target, pos, val.clone(), op, false, id)?;
-                let target = self.value_stack[target_id as usize].clone();
+                let target_id = self.execute_assignment(*raw_target, pos, val.clone(), op, false, id)? as usize;
+                let target = self.value_stack[target_id].clone();
                 let attr = self.execute_value(*raw_attr, pos)?;
                 let attr_index = attr.to_value_index();
 
                 match target.clone() {
-                    Value::Dict(mut entries) => match entries.get(&attr_index) {
-                        Some(old_val) => {
-                            if last_stack {
-                                if !old_val.1 {
-                                    let msg = format!("UnexpectedAttributeAccess: Property {} is readonly at {}.", inspect(attr, self), inspect(target.clone(), self));
-                                    return Err(self.create_error(msg, pos))
-                                }
+                    Value::Dict(dict) => {
+                        let mut entries = dict.entries(self);    
+                        let old_entry = entries.get(&attr_index);                
 
-                                match op {
-                                    0 => self.value_stack[old_val.0 as usize] = val,
-                                    1 => self.value_stack[old_val.0 as usize] = vmcore::add_values(self.value_stack[old_val.0 as usize].clone(), val),
-                                    2 => self.value_stack[old_val.0 as usize] = vmcore::sub_values(self.value_stack[old_val.0 as usize].clone(), val, self),
-                                    _ => ()
+                        match old_entry {
+                            Some((old_val, is_mutable)) => {
+                                if last_stack {
+                                    if !is_mutable {
+                                        let msg = format!("UnexpectedAttributeAccess: Property {} is readonly at {}.", inspect(attr, self), inspect(target.clone(), self));
+                                        return Err(self.create_error(msg, pos))
+                                    }
+                                    
+                                    match dict {
+                                        Dict::Ref(pointer) | Dict::Map(_, Some(pointer)) => {
+                                            // TODO(Scientific-Guy): Perform attribute value assignment without cloning entries and prevent borrow error.
+                                            let mut new_entries = entries.clone();
+                                            new_entries.insert(attr_index, (val.borrow(self), true));
+                                            self.value_stack[pointer as usize] = match op {
+                                                0 => Value::Dict(Dict::Map(new_entries, Some(pointer as u32))),
+                                                1 => vmcore::add_values(old_val.clone(), val),
+                                                2 => vmcore::sub_values(old_val.clone(), val, self),
+                                                _ => Value::Null
+                                            }.to_pointer_value(pointer);
+                                        },
+                                        _ => return Err(self.create_error(
+                                            format!("SegmentationFault: Unexpected kind of dict {:?}.", target),
+                                            pos
+                                        ))
+                                    }
                                 }
-                            }
+    
+                                Ok(target_id as u32)
+                            },
+                            None => {
+                                if last_stack {
+                                    if op != 0 {
+                                        return Err(self.create_error(
+                                            format!(
+                                                "UnexpectedAssignment: You can only assign a value if the previous value is null but you have used a `{}` operator.",
+                                                match op {
+                                                    1 => "+=",
+                                                    2 => "-=",
+                                                    _ => "unknown"
+                                                }
+                                            ), 
+                                            pos
+                                        ))
+                                    }
 
-                            Ok(target_id)
-                        },
-                        None => {
-                            if last_stack {
-                                if op != 0 {
-                                    return Err(self.create_error(
-                                        format!(
-                                            "UnexpectedAssignment: You can only assign a value if the previous value is null but you have used a `{}` operator.",
-                                            match op {
-                                                1 => "+=",
-                                                2 => "-=",
-                                                _ => "unknown"
-                                            }
-                                        ), 
+                                    entries.insert(attr_index, (val.borrow(self), true));
+                                    match dict {
+                                        Dict::Ref(pointer) | Dict::Map(_, Some(pointer)) => self.value_stack[pointer as usize] = Value::Dict(Dict::Map(entries, Some(pointer))),
+                                        _ => return Err(self.create_error(
+                                            format!("SegmentationFault: Unexpected kind of dict {:?}.", target),
+                                            pos
+                                        ))
+                                    }
+
+                                    Ok(0)
+                                } else {
+                                    Err(self.create_error(
+                                        "UnexpectedAttributeAccess: You cannot access attributes of null.".to_string(), 
                                         pos
                                     ))
                                 }
-
-                                self.value_stack.push(val);
-                                entries.insert(attr_index, (self.value_stack.len() as u32 - 1, true));
-                                self.value_stack[target_id as usize] = Value::Dict(entries);
-                                Ok(target_id)
-                            } else {
-                                Err(self.create_error(
-                                    "UnexpectedAttributeAccess: You cannot access attributes of null.".to_string(), 
-                                    pos
-                                ))
                             }
                         }
                     },
@@ -269,22 +292,21 @@ impl VM {
                 let mut entries = HashMap::new();
                 for entry in dict_entries.iter() { 
                     let val = self.execute_value(entry.1.clone(), pos)?;
-                    self.value_stack.push(val);
                     entries.insert(
                         ValueIndex::Str(self.reader.get_constant(entry.0 as usize)), 
-                        (self.value_stack.len() as u32 - 1, true)
+                        (val.borrow(self), true)
                     );
                 }
                 
-                Ok(Value::Dict(entries))
+                Ok(Value::Dict(Dict::Map(entries, None)))
             },
             InstructionValue::Attr(raw_body, raw_attr) => {
                 let attr = self.execute_value(*raw_attr, pos)?.to_value_index();
                 let body = self.execute_value(*raw_body, pos)?;
 
                 match body {
-                    Value::Dict(entries) => match entries.get(&attr) {
-                        Some(val) => Ok(self.value_stack[val.0 as usize].clone()),
+                    Value::Dict(entries) => match entries.entries(self).get(&attr) {
+                        Some(val) => Ok(val.0.clone()),
                         None => Ok(Value::Null)
                     },
                     Value::Str(str) => match attr {
@@ -737,7 +759,8 @@ impl VM {
         Ok(ControlFlow::None)
     }
 
-    pub fn add_value(&mut self, name: String, val: Value, mutable: bool) {
+    pub fn add_value(&mut self, name: String, mut val: Value, mutable: bool) {
+        val = val.borrow(self);
         self.value_stack.push(val);
         self.value_register.push(ValueRegister {
             key: name,
@@ -881,7 +904,7 @@ impl VM {
     pub fn get_value_register(&mut self, id: u32) -> Result<ValueRegister, RuntimeError> {
         let mut i = self.value_register.len() - 1;
         let key = self.reader.get_constant(id as usize);
-        let depth = self.frames.len() as u32 - 1;
+        let depth = self.frames.len() as u32;
 
         loop {
             let value = self.value_register[i].clone();
