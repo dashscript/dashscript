@@ -44,7 +44,6 @@ impl Lexer {
             let char = self.chars[self.ci];
 
             if char == '\n' {
-                self.ci += 1;
                 self.next_line();
                 break;
             }
