@@ -6,6 +6,7 @@ pub mod window;
 pub mod result;
 pub mod math;
 pub mod date;
+pub mod json;
 
 #[macro_export]
 macro_rules! dict {

@@ -866,7 +866,7 @@ impl VM {
     }
 
     pub fn init_core(&mut self) {
-        use super::vmcore::{ window, result, math, date };
+        use super::vmcore::{ window, result, math, date, json };
 
         macro_rules! add_value {
             ($name:expr, $value:expr) => {
@@ -912,6 +912,11 @@ impl VM {
             "now": date::get_current_time_ms_api as NativeFn, 
         });
 
+        let json = dict!(self, {
+            "parse": json::parse_api as NativeFn,
+            "stringify": json::stringify_api as NativeFn,
+        });
+
         let mut window = dict!(self, extendable {
             "filename": self.filename.clone(),
             "platform": env::consts::OS,
@@ -942,6 +947,7 @@ impl VM {
         add_value!("window", dict!(window));
         add_value!("Math", math);
         add_value!("Date", date);
+        add_value!("JSON", json);
     }
 
     pub fn has_permission(&self, name: &str) -> bool {

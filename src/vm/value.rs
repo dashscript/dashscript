@@ -46,7 +46,7 @@ pub enum Value {
     Str(String),
     Num(fsize),
     Dict(Dict),
-    // TODO(Scientific-Guy): Think a better way for native functions.
+    // TODO(Scientific-Guy): Think a better way for native functions
     NativeFn(Box<Value>, NativeFn),
     // Array is used as a value type instead of an object because to prevent unwanted memory of attributes in value register.
     // TODO(Scientific-Guy): Find a way to make array as an object instead of a value type.
@@ -61,6 +61,10 @@ impl From<bool> for Value {
 
 impl From<fsize> for Value { 
     fn from(num: fsize) -> Self { Self::Num(num) } 
+}
+
+impl From<usize> for Value { 
+    fn from(num: usize) -> Self { Self::Num(num as fsize) } 
 }
 
 impl From<&str> for Value {

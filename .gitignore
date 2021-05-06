@@ -16,3 +16,4 @@ test.exe
 test.pdb
 test.rs
 _old_*
+build.sh

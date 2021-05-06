@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::Error;
 use std::env::VarError;
+use serde_json::Error as JsonError;
 use crate::vm::value::{ Value, ValueIndex, Dict, NativeFn };
 use crate::vm::vm::VM;
 use crate::dict;
@@ -27,6 +28,18 @@ impl ValueError for VarError {
             VarError::NotPresent => err(vm, Value::Str("NotFound".to_string())),
             VarError::NotUnicode(_) => err(vm, Value::Str("NotUnicode".to_string())),
         }
+    }
+}
+
+impl ValueError for JsonError {
+    fn to_value_error(&self, vm: &mut VM) -> Value {
+        let content = dict!(vm, {
+            "line": self.line(),
+            "column": self.column(),
+            "type": format!("{:?}", self.classify()),
+        });
+
+        err(vm, content)
     }
 }
 
