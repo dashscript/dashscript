@@ -43,11 +43,15 @@ pub fn run(cli: &Command) {
         return;
     }
 
+    if cli.flags.get("repl").is_some() {
+        println!("WARNING: You are running the code on a repl environment with the `--repl` flag.");
+    }
+
     match VM::new(
         compiler, 
         cli.args[2].clone(),
         body,
-        cli.permissions()
+        cli.flags.clone()
     ) {
         Ok(_) => (),
         Err(msg) => {

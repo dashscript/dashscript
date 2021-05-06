@@ -7,15 +7,15 @@ pub mod common;
 
 fn main() {
 
-    let command = cli::command::Command::new();
+    let mut command = cli::command::Command::new();
 
     if command.args.len() == 1 {
-        cli::repl::start_repl(&command);
+        cli::repl::start_repl(&mut command);
     }
 
     match command.args[1].as_str() {
         "run" => cli::run::run(&command),
-        "repl" => cli::repl::start_repl(&command),
+        "repl" => cli::repl::start_repl(&mut command),
         _ => ()
     }
 

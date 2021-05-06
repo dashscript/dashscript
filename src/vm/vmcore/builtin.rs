@@ -2,8 +2,7 @@ use std::io::{ stdin, stdout, Write };
 use crate::vm::vm::VM;
 use crate::vm::value::{ Value, ValueIndex };
 use crate::common::get_line_col_by_line_data;
-use super::result::{ ok, err };
-use super::into_value_dict;
+use super::result::{ ok, ValueError };
 
 pub fn bool(val: Value) -> bool {
     match val {
@@ -16,11 +15,8 @@ pub fn bool(val: Value) -> bool {
 pub fn readline(vm: &mut VM) -> Value {
     let mut result = String::new();
     match stdin().read_line(&mut result) {
-        Ok(_) => ok(Value::Str(result), vm),
-        Err(e) => err(into_value_dict(vec![
-            ("kind", Value::Str(format!("{:?}", e.kind())), false),
-            ("message", Value::Str(format!("{:?}", e)), false)
-        ], vm), vm)
+        Ok(_) => ok(vm, Value::Str(result)),
+        Err(e) => e.to_value_error(vm)
     }
 }
 
@@ -105,10 +101,7 @@ pub fn typeof_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
 
 pub fn panic_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     panic(match args.get(0) {
-        Some(val) => match val {
-            Value::Str(str) => str.to_string(),
-            _ => inspect(val.clone(), vm)
-        },
+        Some(val) => inspect(val.clone(), vm),
         None => "RuntimePanic: Runtime unexpectedly panicked.".to_string()
     }, vm);
 }
@@ -127,10 +120,7 @@ pub fn prompt_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     }
 
     if let Err(e) = stdout().flush() {
-        return err(into_value_dict(vec![
-            ("kind", Value::Str(format!("{:?}", e.kind())), false),
-            ("message", Value::Str(format!("{:?}", e)), false)
-        ], vm), vm);
+        return e.to_value_error(vm);
     };
 
     readline(vm)
@@ -146,17 +136,11 @@ pub fn confirm_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     }
 
     if let Err(e) = stdout().flush() {
-        return err(into_value_dict(vec![
-            ("kind", Value::Str(format!("{:?}", e.kind())), false),
-            ("message", Value::Str(format!("{:?}", e)), false)
-        ], vm), vm);
+        return e.to_value_error(vm);
     };
     
     match readline(vm) {
-        Value::Str(str) => match str.as_str() {
-            "y" | "Y" => Value::Boolean(true),
-            _ => Value::Boolean(false)
-        },
+        Value::Str(str) => Value::Boolean((str == "Y") || (str == "y")),
         _ => Value::Boolean(false)
     }
 }

@@ -8,8 +8,9 @@ use crate::vm::vm::VM;
 use crate::vm::vmcore::builtin::inspect;
 
 // TODO(Scientific-Guy): Make a better repl. This repl was initially made for testing cases.
-pub fn start_repl(cli: &Command) {
-    let mut vm = VM::default("@repl".to_string(), cli.permissions());
+pub fn start_repl(cli: &mut Command) {
+    cli.flags.insert("repl".to_string(), String::new());
+    let mut vm = VM::default("@repl".to_string(), cli.flags.clone());
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 

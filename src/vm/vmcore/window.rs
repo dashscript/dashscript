@@ -1,13 +1,11 @@
 use std::env;
-use std::env::VarError;
 use std::collections::HashMap;
 use std::time::Duration;
 use std::thread;
 use crate::vm::vm::VM;
 use crate::vm::value::{ Value, ValueIndex, Dict };
 use super::builtin::{ inspect, panic, inspect_tiny };
-use super::result::{ ok, err };
-use super::into_value_dict;
+use super::result::{ ok, ValueError };
 
 pub fn inspect_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     Value::Str(match args.get(0) {
@@ -38,11 +36,8 @@ pub fn get_env_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
         },
         None => panic("InvalidArgumentError: Expected a valid 1 string type argument.".to_string(), vm)
     }) {
-        Ok(val) => ok(Value::Str(val), vm),
-        Err(e) => match e {
-            VarError::NotPresent => err(into_value_dict(vec![("kind", Value::Str("Not Present".to_string()), false)], vm), vm),
-            VarError::NotUnicode(_) => err(into_value_dict(vec![("kind", Value::Str("Not Unicode".to_string()), false)], vm), vm),
-        }
+        Ok(val) => ok(vm, Value::Str(val)),
+        Err(e) => e.to_value_error(vm)
     }
 }
 

@@ -28,18 +28,6 @@ impl Command {
         cmd
     }
 
-    pub fn permissions(&self) -> Vec<String> {
-        let mut perms = Vec::new();
-
-        for entry in self.flags.iter() {
-            if entry.0.starts_with("use-") {
-                perms.push(entry.0[4..].to_string());
-            }
-        }
-
-        perms
-    }
-
     pub fn log_error(&self, reason: String) {
         println!("{}", reason);
         exit(0);

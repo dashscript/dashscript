@@ -1,13 +1,15 @@
 use std::env;
 use std::collections::HashMap;
 use std::fmt;
-use super::value::{ Value, ValueRegister, ValueIndex, ControlFlow, Dict };
-use super::vmcore::{ self, builtin, window, result, memory, into_value_dict, math, date, builtin::inspect };
+use super::vmcore::{ self, builtin };
+use super::vmcore::result::{ ok, err };
+use super::value::{ Value, ValueRegister, ValueIndex, ControlFlow, Dict, NativeFn };
 use crate::lexer::parser::Position;
 use crate::bytecode::reader::LogicalOperator;
 use crate::common::{ fsize, get_line_col_by_line_data };
 use crate::bytecode::main::BytecodeCompiler;
 use crate::bytecode::reader::{ BytecodeReader, InstructionValue, Instruction };
+use crate::dict;
 
 #[derive(Debug)]
 pub struct RuntimeError {
@@ -56,12 +58,12 @@ pub struct VM {
     pub value_stack: Vec<Value>,
     pub value_register: Vec<ValueRegister>,
     pub body_line_data: Vec<usize>,
-    pub permissions: Vec<String>
+    pub flags: HashMap<String, String>
 }
 
 impl VM {
 
-    pub fn new(compiler: BytecodeCompiler, filename: String, body: String, permissions: Vec<String>) -> Result<Self, RuntimeError> {
+    pub fn new(compiler: BytecodeCompiler, filename: String, body: String, flags: HashMap<String, String>) -> Result<Self, RuntimeError> {
         let mut vm = Self {
             pos_map: compiler.pos_map.clone(),
             filename: filename,
@@ -73,7 +75,7 @@ impl VM {
             value_stack: Vec::<Value>::new(),
             value_register: Vec::new(),
             body_line_data: Vec::new(),
-            permissions
+            flags
         };
 
         for line in body.split("\n").collect::<Vec<&str>>().iter() {
@@ -85,7 +87,7 @@ impl VM {
         Ok(vm)
     }
 
-    pub fn default(filename: String, permissions: Vec<String>) -> Self {
+    pub fn default(filename: String, flags: HashMap<String, String>) -> Self {
         Self {
             pos_map: Vec::new(),
             filename,
@@ -97,7 +99,7 @@ impl VM {
             value_stack: Vec::<Value>::new(),
             value_register: Vec::new(),
             body_line_data: Vec::new(),
-            permissions
+            flags
         }
     }
 
@@ -131,7 +133,7 @@ impl VM {
             Instruction::Const(pos, name, value) => {
                 let name = self.reader.get_constant(name as usize);
                 let value = self.execute_value(value, pos)?;
-                
+
                 if self.value_exists(name.clone()) {
                     return Err(self.create_error(
                         format!("AssignmentError: Identifier {} has already declared.", name),
@@ -218,7 +220,7 @@ impl VM {
                             Some((old_val, is_mutable)) => {
                                 if last_stack {
                                     if !is_mutable {
-                                        let msg = format!("UnexpectedAttributeAccess: Property {} is readonly at {}.", inspect(attr, self), inspect(target.clone(), self));
+                                        let msg = format!("UnexpectedAttributeAccess: Property {} is readonly at {}.", builtin::inspect(attr, self), builtin::inspect(target.clone(), self));
                                         return Err(self.create_error(msg, pos))
                                     }
                                     
@@ -345,11 +347,11 @@ impl VM {
                             "toNumber" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, vm| {
                                 if let Value::Str(str) = this {
                                     match str.parse::<fsize>() {
-                                        Ok(num) => result::ok(Value::Num(num), vm),
-                                        Err(_) => result::err(Value::Str("Improper number.".to_string()), vm)
+                                        Ok(num) => ok(vm, Value::Num(num)),
+                                        Err(_) => err(vm, Value::Str("Improper number.".to_string()))
                                     }
                                 } else {
-                                    result::err(Value::Str("Improper number.".to_string()), vm)
+                                    err(vm, Value::Str("Improper number.".to_string()))
                                 }
                             }),
                             "startsWith" => Value::NativeFn(Box::new(Value::Str(str)), |this, args, vm| {
@@ -787,78 +789,82 @@ impl VM {
     }
 
     pub fn init_core(&mut self) {
-        self.add_value("print".to_string(), Value::to_native_fn(builtin::print_api), false);
-        self.add_value("typeof".to_string(), Value::to_native_fn(builtin::typeof_api), false);
-        self.add_value("panic".to_string(), Value::to_native_fn(builtin::panic_api), false);
-        self.add_value("readline".to_string(), Value::to_native_fn(builtin::readline_api), false);
-        self.add_value("prompt".to_string(), Value::to_native_fn(builtin::prompt_api), false);
-        self.add_value("confirm".to_string(), Value::to_native_fn(builtin::confirm_api), false);
-        self.add_value("inf".to_string(), Value::Num(fsize::INFINITY), false);
-        self.add_value("boolean".to_string(), Value::to_native_fn(builtin::bool_api), false);
-        self.add_value("Ok".to_string(), Value::to_native_fn(result::ok_api), false);
-        self.add_value("Err".to_string(), Value::to_native_fn(result::err_api), false);
+        use super::vmcore::{ window, result, math, date };
 
-        let math_entries = into_value_dict(vec![
-            ("floor", Value::to_native_fn(math::floor_api), false),
-            ("round", Value::to_native_fn(math::round_api), false),
-            ("ceil", Value::to_native_fn(math::ceil_api), false),
-            ("trunc", Value::to_native_fn(math::trunc_api), false),
-            ("abs", Value::to_native_fn(math::abs_api), false),
-            ("sqrt", Value::to_native_fn(math::sqrt_api), false),
-            ("sin", Value::to_native_fn(math::sin_api), false),
-            ("cos", Value::to_native_fn(math::cos_api), false),
-            ("tan", Value::to_native_fn(math::tan_api), false),
-            ("random", Value::to_native_fn(math::random_api), false),
-            ("randomRange", Value::to_native_fn(math::random_range_api), false),
-            ("randomInt", Value::to_native_fn(math::random_int_api), false),
-            ("PI", Value::Num(3.141592653589793), false),
-            ("E", Value::Num(2.718281828459045), false)
-        ], self);
-
-        let date_entries = into_value_dict(vec![
-            ("now", Value::to_native_fn(date::get_current_time_ms_api), false)
-        ], self);
-
-        let mut window_entries = vec![
-            ("filename", Value::Str(self.filename.clone()), false),
-            ("platform", Value::Str(env::consts::OS.to_string()), false),
-            ("arch", Value::Str(env::consts::ARCH.to_string()), false),
-            ("platformFamily", Value::Str(env::consts::FAMILY.to_string()), false),
-            ("version", Value::Str("1.0.0".to_string()), false),
-            ("exit", Value::to_native_fn(window::exit_api), false),
-            ("inspect", Value::to_native_fn(window::inspect_api), false),
-            ("sleep", Value::to_native_fn(window::sleep_api), false)
-        ];
-
-        if self.permissions.contains(&"env".to_string()) {
-            window_entries.push((
-                "env", 
-                (into_value_dict(vec![
-                    ("get", Value::to_native_fn(window::get_env_api), false),
-                    ("set", Value::to_native_fn(window::set_env_api), false),
-                    ("all", Value::to_native_fn(window::all_env_api), false),
-                    ("delete", Value::to_native_fn(window::delete_env_api), false)
-                ], self)),
-                false
-            ));
+        macro_rules! add_value {
+            ($name:expr, $value:expr) => {
+                self.add_value($name.to_string(), Value::from($value), false);
+            };
         }
 
-        if self.permissions.contains(&"memory".to_string()) {
-            window_entries.push((
-                "memory",
-                into_value_dict(vec![
-                    ("getByPointer", Value::to_native_fn(memory::get_by_pointer_api), false),
-                    ("push", Value::to_native_fn(memory::push_api), false),
-                    ("len", Value::to_native_fn(memory::len_api), false)
-                ], self),
-                false
-            ))
+        // Builtin functions
+        add_value!("print", builtin::print_api as NativeFn);
+        add_value!("typeof", builtin::print_api as NativeFn);
+        add_value!("panic", builtin::panic_api as NativeFn);
+        add_value!("readline", builtin::readline_api as NativeFn);
+        add_value!("prompt", builtin::prompt_api as NativeFn);
+        add_value!("confirm", builtin::confirm_api as NativeFn);
+        add_value!("Boolean", builtin::bool_api as NativeFn);
+        add_value!("Ok", result::ok_api as NativeFn);
+        add_value!("Err", result::err_api as NativeFn);
+
+        // Builtin constants
+        add_value!("inf", fsize::INFINITY);
+        add_value!("NaN", fsize::NAN);
+
+        // Bultin namespaces(dicts)
+        let math = dict!(self, {
+            "floor": math::floor_api as NativeFn,
+            "round": math::round_api as NativeFn,
+            "ceil": math::ceil_api as NativeFn,
+            "trunc": math::trunc_api as NativeFn,
+            "abs": math::abs_api as NativeFn,
+            "sqrt": math::sqrt_api as NativeFn,
+            "sin": math::sin_api as NativeFn,
+            "cos": math::cos_api as NativeFn,
+            "tan": math::tan_api as NativeFn,
+            "random": math::random_api as NativeFn,
+            "randomInt": math::random_int_api as NativeFn,
+            "randomRange": math::random_range_api as NativeFn,
+            "PI": 3.141592653589793,
+            "E": 2.718281828459045,
+        });
+
+        let date = dict!(self, { 
+            "now": date::get_current_time_ms_api as NativeFn, 
+        });
+
+        let mut window = dict!(self, extendable {
+            "filename": self.filename.clone(),
+            "platform": env::consts::OS,
+            "arch": env::consts::ARCH,
+            "platformFamily": env::consts::FAMILY,
+            "version": "1.0.0",
+            "repl": self.flags.get("repl").is_some(),
+            "exit": window::exit_api as NativeFn,
+            "inspect": window::inspect_api as NativeFn,
+            "inspectTiny": window::inspect_tiny_api as NativeFn,
+            "sleep": window::sleep_api as NativeFn,
+        });
+
+        if self.has_permission("env") {
+            dict!(self, extend window => {
+                "env": dict!(self, {
+                    "get": window::get_env_api as NativeFn,
+                    "set": window::set_env_api as NativeFn,
+                    "delete": window::delete_env_api as NativeFn,
+                    "all": window::all_env_api as NativeFn,
+                }),
+            });
         }
 
-        let window = into_value_dict(window_entries, self);
-        self.add_value("Math".to_string(), math_entries, false);
-        self.add_value("Date".to_string(), date_entries, false);
-        self.add_value("window".to_string(), window, false);
+        add_value!("window", dict!(window));
+        add_value!("Math", math);
+        add_value!("Date", date);
+    }
+
+    pub fn has_permission(&self, name: &str) -> bool {
+        self.flags.get(&("use-".to_string() + name)).is_some()
     }
 
     pub fn create_error(&self, message: String, pos_id: usize) -> RuntimeError {
@@ -889,7 +895,7 @@ impl VM {
     }
 
     pub fn get_stack_trace(&self) -> Vec<String> {
-        if self.permissions.contains(&"deep-stack-trace".to_string()) {
+        if self.flags.get("deep-stack-trace").is_some() {
             self.frames.iter()
             .map(|x| x.name.clone())
             .collect()

@@ -63,12 +63,20 @@ impl From<fsize> for Value {
     fn from(num: fsize) -> Self { Self::Num(num) } 
 }
 
+impl From<&str> for Value {
+    fn from(str: &str) -> Self { Self::Str(str.to_string()) }
+}
+
 impl From<String> for Value {
     fn from(str: String) -> Self { Self::Str(str) }
 }
 
 impl From<NativeFn> for Value {
     fn from(func: NativeFn) -> Self { Self::NativeFn(Box::new(Value::Null), func) }
+}
+
+impl From<(Value, NativeFn)> for Value {
+    fn from(func: (Value, NativeFn)) -> Self { Self::NativeFn(Box::new(func.0), func.1) }
 }
 
 impl Default for Value {

@@ -1,35 +1,63 @@
-use crate::vm::{ value::Value, vm::VM };
+use std::collections::HashMap;
+use std::io::Error;
+use std::env::VarError;
+use crate::vm::value::{ Value, ValueIndex, Dict, NativeFn };
+use crate::vm::vm::VM;
+use crate::dict;
 use super::builtin::panic;
-use super::into_value_dict;
 
-pub fn ok(val: Value, vm: &mut VM) -> Value {
-    into_value_dict(vec![
-        ("isOk", Value::Boolean(true), false),
-        ("isErr", Value::Boolean(false), false),
-        ("unwrap", Value::NativeFn(Box::new(val), |this, _, _| this), false),
-        ("unwrapError", Value::to_native_fn(|_, _, vm| panic("UnwrapError: Unwrapping an error when the result is ok.".to_string(), vm)), false)
-    ], vm)
+pub trait ValueError {
+    fn to_value_error(&self, vm: &mut VM) -> Value;
 }
 
-pub fn err(val: Value, vm: &mut VM) -> Value {
-    into_value_dict(vec![
-        ("isOk", Value::Boolean(false), false),
-        ("isErr", Value::Boolean(true), false),
-        ("unwrapError", Value::NativeFn(Box::new(val), |this, _, _| this), false),
-        ("unwrap", Value::to_native_fn(|_, _, vm| panic("UnwrapError: Unwrapping an result when the result is error.".to_string(), vm)), false)
-    ], vm)
+impl ValueError for Error {
+    fn to_value_error(&self, vm: &mut VM) -> Value {
+        let content = dict!(vm, {
+            "kind": format!("{:?}", self.kind()),
+            "message": format!("{:?}", self),
+        });
+
+        return err(vm, content);
+    }
+}
+
+impl ValueError for VarError {
+    fn to_value_error(&self, vm: &mut VM) -> Value {
+        match self {
+            VarError::NotPresent => err(vm, Value::Str("NotFound".to_string())),
+            VarError::NotUnicode(_) => err(vm, Value::Str("NotUnicode".to_string())),
+        }
+    }
+}
+
+pub fn ok(vm: &mut VM, val: Value) -> Value {
+    dict!(vm, {
+        "isOk": true,
+        "isErr": false,
+        "unwrap": (val, (|this, _, _| this) as NativeFn),
+        "unwrapError": (|_, _, vm| panic("UnwrapError: Unwrapping an error when the result is ok.".to_string(), vm)) as NativeFn,
+    })
+}
+
+pub fn err(vm: &mut VM, val: Value) -> Value {
+    dict!(vm, {
+        "isOk": false,
+        "isErr": true,
+        "unwrapError": (val, (|this, _, _| this) as NativeFn),
+        "unwrap": (|_, _, vm| panic("UnwrapError: Unwrapping result when the result is err.".to_string(), vm)) as NativeFn,
+    })
 }
 
 pub fn ok_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
-    ok(match args.get(0) {
+    ok(vm, match args.get(0) {
         Some(val) => val.clone(),
         _ => Value::Null
-    }, vm)
+    })
 }
 
 pub fn err_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
-    err(match args.get(0) {
+    err(vm, match args.get(0) {
         Some(val) => val.clone(),
         _ => Value::Null
-    }, vm)
+    })
 }
