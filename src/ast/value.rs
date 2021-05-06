@@ -276,7 +276,7 @@ impl AST {
                 TokenType::Punc('[') => {
                     self.ci += 1;
                     let index = self.get_value("dserror(15): Improper indexing for the object.")?;
-                    self.ci += 1;
+                    self.ci += 2;
 
                     match self.tokens.get(self.ci) {
                         Some(Token {

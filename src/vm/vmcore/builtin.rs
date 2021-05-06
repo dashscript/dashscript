@@ -45,13 +45,9 @@ pub fn inspect(val: Value, vm: &mut VM) -> String {
 
             content + "}"
         },
-        Value::Array(vec) => {
+        Value::Array(arr) => {
             let mut content = "[\n".to_string();
-
-            for item in vec.iter() {
-                content += format!("    {},\n", inspect_tiny(vm.value_stack.get(*item as usize).unwrap().clone())).as_str();
-            }
-
+            for item in arr.vec(vm).iter().cloned() { content += format!("    {},\n", inspect_tiny(item)).as_str() }
             content + "]"
         }
         //_ => "unknown".to_string()

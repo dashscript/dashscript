@@ -50,7 +50,7 @@ pub enum Value {
     NativeFn(Box<Value>, NativeFn),
     // Array is used as a value type instead of an object because to prevent unwanted memory of attributes in value register.
     // TODO(Scientific-Guy): Find a way to make array as an object instead of a value type.
-    Array(Vec<u32>),
+    Array(Array),
     Func(u32, Vec<(u32, bool)>, Vec<u8>, bool),
     Null
 }
@@ -107,10 +107,12 @@ impl fmt::Debug for Value {
             Value::Num(num) => num.to_string(),
             Value::Boolean(bool) => bool.to_string(),
             Value::Null => "null".to_string(),
-            Value::Dict(Dict::Map(_, Some(id))) => format!("[Object(Map({}))]", id),
-            Value::Dict(Dict::Map(_, None)) => format!("[Object(Map)]"),
+            Value::Dict(Dict::Map(_, Some(id))) => format!("[Object({})]", id),
+            Value::Dict(Dict::Map(_, None)) => format!("[Object]"),
             Value::Dict(Dict::Ref(id)) => format!("[Object(Ref({}))]", id),
-            Value::Array(_) => "[Array]".to_string(),
+            Value::Array(Array::Vec(_, Some(id))) => format!("[Array({})]", id),
+            Value::Array(Array::Vec(_, None)) => format!("[Array]"),
+            Value::Array(Array::Ref(id)) => format!("[Array(Ref({}))]", id),
             Value::Func(_, _, _, _)  => "[Function]".to_string(),
             Value::NativeFn(_, _) => "[NativeFunction]".to_string()
         })
@@ -150,10 +152,7 @@ impl Value {
         match self {
             Value::Array(arr) => {
                 let mut res = vec![];
-                for item in arr {
-                    res.push(vm.value_stack.get(*item as usize).unwrap_or(&Value::Null).clone())
-                }
-
+                for item in arr.vec(vm) { res.push(item) }
                 res
             },
             _ => vec![]
@@ -166,6 +165,11 @@ impl Value {
                 Dict::Map(entries, None) => Dict::Map(entries, Some(pointer)),
                 Dict::Map(_, Some(id)) => Dict::Ref(id),
                 dict => dict
+            }),
+            Value::Array(arr) => Value::Array(match arr.clone() {
+                Array::Vec(vector, None) => Array::Vec(vector, Some(pointer)),
+                Array::Vec(_, Some(id)) => Array::Ref(id),
+                arr => arr
             }),
             value => value.clone()
         }
@@ -181,6 +185,15 @@ impl Value {
                 },
                 Dict::Map(_, Some(id)) => Dict::Ref(id),
                 dict => dict
+            }),
+            Value::Array(arr) => Value::Array(match arr.clone() {
+                Array::Vec(vector, None) => {
+                    let val = Value::Array(Array::Vec(vector, Some(vm.value_stack.len() as u32 + 1)));
+                    vm.value_stack.push(val.clone());
+                    return val;
+                }, 
+                Array::Vec(_, Some(id)) => Array::Ref(id),
+                arr => arr
             }),
             value => value.clone()
         }
@@ -223,6 +236,33 @@ impl Dict {
             Dict::Ref(id) => match vm.value_stack[*id as usize].clone() {
                 Value::Dict(dict) => dict.entries(vm),
                 _ => HashMap::new()
+            }
+        }
+    }
+
+}
+
+#[derive(Clone)]
+pub enum Array {
+    Vec(Vec<Value>, Option<u32>),
+    Ref(u32)
+}
+
+impl Array {
+
+    pub fn pointer(&self) -> Option<u32> {
+        match self {
+            Array::Vec(_, id) => *id,
+            Array::Ref(id) => Some(*id)
+        }
+    }
+
+    pub fn vec(&self, vm: &mut VM) -> Vec<Value> {
+        match self {
+            Array::Vec(vec, _) => vec.clone(),
+            Array::Ref(id) => match vm.value_stack[*id as usize].clone() {
+                Value::Array(arr) => arr.vec(vm),
+                _ => vec![]
             }
         }
     }

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fmt;
 use super::vmcore::{ self, builtin };
 use super::vmcore::result::{ ok, err };
-use super::value::{ Value, ValueRegister, ValueIndex, ControlFlow, Dict, NativeFn };
+use super::value::{ Value, ValueRegister, ValueIndex, ControlFlow, Dict, Array, NativeFn };
 use crate::lexer::parser::Position;
 use crate::bytecode::reader::LogicalOperator;
 use crate::common::{ fsize, get_line_col_by_line_data };
@@ -228,13 +228,14 @@ impl VM {
                                         Dict::Ref(pointer) | Dict::Map(_, Some(pointer)) => {
                                             // TODO(Scientific-Guy): Perform attribute value assignment without cloning entries and prevent borrow error.
                                             let mut new_entries = entries.clone();
-                                            new_entries.insert(attr_index, (val.borrow(self), true));
-                                            self.value_stack[pointer as usize] = match op {
-                                                0 => Value::Dict(Dict::Map(new_entries, Some(pointer as u32))),
+                                            new_entries.insert(attr_index, (match op {
+                                                0 => val,
                                                 1 => vmcore::add_values(old_val.clone(), val),
                                                 2 => vmcore::sub_values(old_val.clone(), val, self),
                                                 _ => Value::Null
-                                            }.to_pointer_value(pointer);
+                                            }.borrow(self), true));
+
+                                            self.value_stack[pointer as usize] = Value::Dict(Dict::Map(new_entries, Some(pointer as u32)))
                                         },
                                         _ => return Err(self.create_error(
                                             format!("SegmentationFault: Unexpected kind of dict {:?}.", target),
@@ -278,6 +279,82 @@ impl VM {
                                     ))
                                 }
                             }
+                        }
+                    },
+                    Value::Array(arr) => {
+                        let vector = arr.vec(self);
+
+                        match attr_index {
+                            ValueIndex::Num(raw_index) => {
+                                let old_entry = vector.get(raw_index.0 as usize);
+                                let index = raw_index.0 as usize;
+
+                                match old_entry {
+                                    Some(old_val) => {
+                                        if last_stack {
+                                            match arr {
+                                                Array::Ref(pointer) | Array::Vec(_, Some(pointer)) => {
+                                                    let mut new_vector = vector.clone();
+                                                    new_vector[index] = match op {
+                                                        0 => val,
+                                                        1 => vmcore::add_values(old_val.clone(), val),
+                                                        2 => vmcore::sub_values(old_val.clone(), val, self),
+                                                        _ => Value::Null
+                                                    }.to_pointer_value(pointer);
+
+                                                    self.value_stack[pointer as usize] = Value::Array(Array::Vec(new_vector, Some(pointer as u32)));
+                                                },
+                                                _ => return Err(self.create_error(
+                                                    format!("SegmentationFault: Unexpected kind of array {:?}.", target),
+                                                    pos
+                                                ))
+                                            }
+                                        }
+
+                                        Ok(target_id as u32)
+                                    },
+                                    None => {
+                                        if last_stack {
+                                            if op != 0 {
+                                                return Err(self.create_error(
+                                                    format!(
+                                                        "UnexpectedAssignment: You can only assign a value if the previous value is null but you have used a `{}` operator.",
+                                                        match op {
+                                                            1 => "+=",
+                                                            2 => "-=",
+                                                            _ => "unknown"
+                                                        }
+                                                    ), 
+                                                    pos
+                                                ))
+                                            }
+
+                                            let mut new_vector = vector.clone();
+                                            new_vector.resize_with(index + 1, || Value::Null);
+                                            new_vector[index] = val;
+            
+                                            match arr {
+                                                Array::Ref(pointer) | Array::Vec(_, Some(pointer)) => self.value_stack[pointer as usize] = Value::Array(Array::Vec(new_vector, Some(pointer))),
+                                                _ => return Err(self.create_error(
+                                                    format!("SegmentationFault: Unexpected kind of array {:?}.", target),
+                                                    pos
+                                                ))
+                                            }
+
+                                            Ok(0)
+                                        } else {
+                                            Err(self.create_error(
+                                                "UnexpectedAttributeAccess: You cannot access attributes of null.".to_string(), 
+                                                pos
+                                            ))
+                                        }
+                                    }
+                                }
+                            },
+                            _ => Err(self.create_error(
+                                format!("UnexpectedAttributeAccess: You cannot set attributes of type {} for array.", target.type_as_str()), 
+                                pos
+                            ))
                         }
                     },
                     _ => Err(self.create_error(
@@ -402,16 +479,9 @@ impl VM {
                         _ => Ok(Value::Null), 
                     },
                     Value::Array(arr) => match attr {
-                        ValueIndex::Num(num) => {
-                            let index = match arr.get(num.0 as usize) {
-                                Some(val) => *val,
-                                None => return Ok(Value::Null)
-                            } as usize;
-
-                            Ok(match self.value_stack.get(index) {
-                                Some(val) => val.clone(),
-                                None => builtin::panic(format!("MemoryFailure: Could not find pointer {}.", index), self)
-                            })
+                        ValueIndex::Num(num) => match arr.vec(self).get(num.0 as usize) {
+                            Some(val) => Ok(val.clone()),
+                            None => return Ok(Value::Null)
                         },
                         _ => Ok(Value::Null)
                     },
@@ -450,14 +520,8 @@ impl VM {
             },
             InstructionValue::Array(vec) => {
                 let mut items = Vec::new();
-
-                for item in vec {
-                    let val = self.execute_value(item, pos)?;
-                    self.value_stack.push(val);
-                    items.push(self.value_stack.len() as u32 - 1);
-                }
-
-                Ok(Value::Array(items))
+                for item in vec { items.push(self.execute_value(item, pos)?.borrow(self)) }
+                Ok(Value::Array(Array::Vec(items, None)))
             },
             InstructionValue::Or(target, falsy_value) => Ok({
                 let target_val = self.execute_value(*target, pos)?;
@@ -576,18 +640,10 @@ impl VM {
                         None => Value::Null
                     }
                 } else {
-                    match params.get(i..) {
-                        Some(params) => {
-                            let mut ids = vec![];
-                            for param in params {
-                                self.value_stack.push(param.clone());
-                                ids.push(self.value_stack.len() as u32 - 1);
-                            }
-
-                            Value::Array(ids)
-                        },
-                        None => Value::Array(vec![])
-                    }
+                    Value::Array(Array::Vec(match params.get(i..) {
+                        Some(params) => params.to_vec(),
+                        None => vec![]
+                    }, None))
                 }
             };
 
