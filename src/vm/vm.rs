@@ -1,5 +1,6 @@
 use std::env;
 use std::collections::HashMap;
+use std::process;
 use std::fmt;
 use super::vmcore::{ self, builtin };
 use super::vmcore::result::{ ok, err };
@@ -875,6 +876,7 @@ impl VM {
 
         // Builtin functions
         add_value!("print", builtin::print_api as NativeFn);
+        add_value!("alert", builtin::alert_api as NativeFn);
         add_value!("typeof", builtin::print_api as NativeFn);
         add_value!("panic", builtin::panic_api as NativeFn);
         add_value!("readline", builtin::readline_api as NativeFn);
@@ -916,11 +918,14 @@ impl VM {
             "arch": env::consts::ARCH,
             "platformFamily": env::consts::FAMILY,
             "version": "1.0.0",
+            "pid": process::id() as fsize,
             "repl": self.flags.get("repl").is_some(),
             "exit": window::exit_api as NativeFn,
             "inspect": window::inspect_api as NativeFn,
             "inspectTiny": window::inspect_tiny_api as NativeFn,
             "sleep": window::sleep_api as NativeFn,
+            "hasPermission": window::has_permission_api as NativeFn,
+            "trace": window::trace_api as NativeFn,
         });
 
         if self.has_permission("env") {

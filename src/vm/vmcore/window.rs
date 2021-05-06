@@ -4,6 +4,7 @@ use std::time::Duration;
 use std::thread;
 use crate::vm::vm::VM;
 use crate::vm::value::{ Value, ValueIndex, Dict };
+use crate::common::get_line_col_by_line_data;
 use super::builtin::{ inspect, panic, inspect_tiny };
 use super::result::{ ok, ValueError };
 
@@ -88,5 +89,28 @@ pub fn sleep_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     };
 
     thread::sleep(duration);
+    Value::Null
+}
+
+pub fn has_permission_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+    Value::Boolean(vm.has_permission(match args.get(0) {
+        Some(Value::Str(str)) => str.as_str(),
+        _ => panic("InvalidArgumentError: Expected a valid 1 string type argument.".to_string(), vm)
+    }))
+}
+
+pub fn trace_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+    let mut address = String::new();
+
+    for frame in vm.get_stack_trace().into_iter().rev() { 
+        address += &format!("    at {}\n", frame).to_string();
+    }
+
+    let (line, col) = get_line_col_by_line_data(vm.body_line_data.clone(), vm.reader.ci);
+    println!("{} ({}:{}:{})\n{}", match args.get(0) {
+        Some(value) => inspect(value.clone(), vm),
+        _ => String::new()
+    }, vm.filename, line, col, address);
+
     Value::Null
 }

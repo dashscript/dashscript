@@ -1,4 +1,4 @@
-use std::io::{ stdin, stdout, Write };
+use std::io::{ stdin, stdout, Write, Read };
 use crate::vm::vm::VM;
 use crate::vm::value::{ Value, ValueIndex };
 use crate::common::get_line_col_by_line_data;
@@ -9,14 +9,6 @@ pub fn bool(val: Value) -> bool {
         Value::Boolean(false) | Value::Null => false,
         Value::Num(num) => num == 0.0,
         _ => true
-    }
-}
-
-pub fn readline(vm: &mut VM) -> Value {
-    let mut result = String::new();
-    match stdin().read_line(&mut result) {
-        Ok(_) => ok(vm, Value::Str(result)),
-        Err(e) => e.to_value_error(vm)
     }
 }
 
@@ -50,7 +42,6 @@ pub fn inspect(val: Value, vm: &mut VM) -> String {
             for item in arr.vec(vm).iter().cloned() { content += format!("    {},\n", inspect_tiny(item)).as_str() }
             content + "]"
         }
-        //_ => "unknown".to_string()
     }
 }
 
@@ -63,14 +54,13 @@ pub fn inspect_tiny(val: Value) -> String {
         Value::Dict(_) => "[Object]".to_string(),
         Value::Array(_) => "[Array]".to_string(),
         Value::Func(_, _, _, _) | Value::NativeFn(_, _)  => "[Function]".to_string()
-        //_ => "unknown".to_string()
     }
 }
 
 pub fn panic(message: String, vm: &mut VM) -> ! {
     let mut address = String::new();
 
-    for frame in vm.get_stack_trace().into_iter().rev() {
+    for frame in vm.get_stack_trace().into_iter().rev() { 
         address += &format!("    at {}\n", frame).to_string();
     }
 
@@ -103,15 +93,16 @@ pub fn panic_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
 }
 
 pub fn readline_api(_this: Value, _args: Vec<Value>, vm: &mut VM) -> Value {
-    readline(vm)
+    let mut result = String::new();
+    match stdin().read_line(&mut result) {
+        Ok(_) => ok(vm, Value::Str(result)),
+        Err(e) => e.to_value_error(vm)
+    }
 }
 
 pub fn prompt_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     match args.get(0) {
-        Some(val) => match val {
-            Value::Str(str) => print!("{}", str),
-            _ => print!("{}", inspect(val.clone(), vm))
-        },
+        Some(value) => print!("{}", inspect(value.clone(), vm)),
         _ => ()
     }
 
@@ -119,26 +110,43 @@ pub fn prompt_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
         return e.to_value_error(vm);
     };
 
-    readline(vm)
+    let mut result = String::new();
+    match stdin().read_line(&mut result) {
+        Ok(_) => ok(vm, Value::Str(result)),
+        Err(e) => e.to_value_error(vm)
+    }
 }
 
 pub fn confirm_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
     match args.get(0) {
-        Some(val) => match val {
-            Value::Str(str) => print!("{}", str),
-            _ => print!("{}", inspect(val.clone(), vm))
-        },
+        Some(value) => print!("{}", inspect(value.clone(), vm)),
         _ => ()
     }
 
-    if let Err(e) = stdout().flush() {
-        return e.to_value_error(vm);
+    if let Err(_) = stdout().flush() {
+        return Value::Boolean(false);
+    };
+
+    let mut result = String::new();
+    match stdin().read_line(&mut result) {
+        Ok(_) => Value::Boolean((result == "y") || (result == "Y")),
+        Err(_) => Value::Boolean(false)
+    }
+}
+
+pub fn alert_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+    match args.get(0) {
+        Some(Value::Str(str)) => print!("{}", str),
+        Some(value) => print!("{}", inspect(value.clone(), vm)),
+        _ => ()
+    }
+
+    if let Err(_) = stdout().flush() {
+        return Value::Null;
     };
     
-    match readline(vm) {
-        Value::Str(str) => Value::Boolean((str == "Y") || (str == "y")),
-        _ => Value::Boolean(false)
-    }
+    stdin().bytes().next();
+    Value::Null
 }
 
 pub fn bool_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
