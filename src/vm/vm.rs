@@ -331,18 +331,10 @@ impl VM {
                         ValueIndex::Str(attr) => Ok(match attr.as_str() {
                             "length" => Value::Num(str.chars().count() as fsize),
                             "toLowerCase" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, _| {
-                                if let Value::Str(str) = this {
-                                    Value::Str(str.to_lowercase())
-                                } else {
-                                    Value::Null
-                                }
+                                if let Value::Str(str) = this { Value::Str(str.to_lowercase()) } else { Value::Null }
                             }),
                             "toUpperCase" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, _| {
-                                if let Value::Str(str) = this {
-                                    Value::Str(str.to_uppercase())
-                                } else {
-                                    Value::Null
-                                }
+                                if let Value::Str(str) = this { Value::Str(str.to_uppercase()) } else { Value::Null }
                             }),
                             "toNumber" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, vm| {
                                 if let Value::Str(str) = this {
@@ -393,13 +385,13 @@ impl VM {
                             }),
                             "escapeDebug" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, _| {
                                 if let Value::Str(str) = this {
-                                    Value::Str(str.escape_debug().to_string())
-                                } else {
-                                    Value::Null
-                                }
+                                    Value::Str(str.escape_debug().to_string()) 
+                                } else { Value::Null }
                             }),
                             "trim" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, _| {
-                                if let Value::Str(str) = this { Value::Str(str.trim().to_string()) } else { Value::Null }
+                                if let Value::Str(str) = this { 
+                                    Value::Str(str.trim().to_string()) 
+                                } else { Value::Null }
                             }),
                             _ => Value::Null
                         }),
