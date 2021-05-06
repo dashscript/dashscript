@@ -656,11 +656,39 @@ impl VM {
         while builtin::bool(self.execute_value(condition.clone(), pos)?) {
             for instruction in &instructions {
                 match instruction {
-                    Instruction::Break => return Ok(None),
-                    Instruction::Continue(_) => continue,
-                    Instruction::Return(pos, value) => return Ok(Some(self.execute_value(value.clone(), *pos)?)),
+                    Instruction::Break => {
+                        self.reader.update_state(state);
+                        self.remove_frame();
+                        return Ok(None)
+                    },
+                    Instruction::Continue(_) => break,
+                    Instruction::Return(pos, value) => {
+                        self.reader.update_state(state);
+                        self.remove_frame();
+                        return Ok(Some(self.execute_value(value.clone(), *pos)?))
+                    },
+                    Instruction::Condition(pos, main_chain, else_chunk) => {
+                        match self.execute_condition_chain(main_chain.clone(), else_chunk.clone(), *pos)? {
+                            ControlFlow::None => (),
+                            ControlFlow::Return(val) => {
+                                self.reader.update_state(state);
+                                self.remove_frame();
+                                return Ok(Some(val))
+                            },
+                            ControlFlow::Break => {
+                                self.reader.update_state(state);
+                                self.remove_frame();
+                                return Ok(None)
+                            }
+                        }
+                    },
                     Instruction::While(pos, condition, chunk) => {
-                        if let Some(val) = self.execute_while_loop(condition.clone(), chunk.clone(), *pos)? { return Ok(Some(val)) }
+                        if let Some(val) = self.execute_while_loop(condition.clone(), chunk.clone(), *pos)? { 
+                            self.reader.update_state(state);
+                            self.remove_frame();
+                            return Ok(Some(val)) 
+                        }
+
                         self.reader.ci += 1;
                     },
                     _ => {
@@ -670,8 +698,8 @@ impl VM {
             }
         }
 
-        self.frames.pop();
         self.reader.update_state(state);
+        self.remove_frame();
         Ok(None)
     }
 
