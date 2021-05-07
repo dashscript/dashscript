@@ -2,6 +2,7 @@ use std::fmt;
 use std::collections::HashMap;
 use std::hash::{ Hash, Hasher };
 use crate::common::{ fsize, MAX_BYTES };
+use super::array::Array;
 use super::vm::VM;
 
 #[derive(Debug, Clone)]
@@ -30,15 +31,14 @@ impl Hash for FloatLike {
 
 pub type NativeFn = fn (this: Value, Vec<Value>, &mut VM) -> Value;
 
-#[derive(Clone, Hash, PartialEq, Debug)]
+// Seperate value index type for Value but used to index map keys.
+#[derive(Clone, Hash, PartialEq, Debug, Eq)]
 pub enum ValueIndex {
     Boolean(bool),
     Str(String),
     Num(FloatLike),
     Null
 }
-
-impl Eq for ValueIndex {}
 
 #[derive(Clone)]
 pub enum Value {
@@ -48,7 +48,6 @@ pub enum Value {
     Dict(Dict),
     // TODO(Scientific-Guy): Think a better way for native functions
     NativeFn(Box<Value>, NativeFn),
-    // Array is used as a value type instead of an object because to prevent unwanted memory of attributes in value register.
     // TODO(Scientific-Guy): Find a way to make array as an object instead of a value type.
     Array(Array),
     Func(u32, Vec<(u32, bool)>, Vec<u8>, bool),
@@ -125,10 +124,6 @@ impl fmt::Debug for Value {
 
 impl Value {
 
-    pub fn to_native_fn(func: NativeFn) -> Self {
-        Self::NativeFn(Box::new(Value::Null), func)
-    }
-
     pub fn type_as_str(&self) -> String {
         String::from(
             match self {
@@ -163,6 +158,7 @@ impl Value {
         }
     }
 
+    // TODO(Scientific-Guy): Make an alternative way to use this function.
     pub fn to_pointer_value(&self, pointer: u32) -> Value {
         match self {
             Value::Dict(dict) => Value::Dict(match dict.clone() {
@@ -181,24 +177,28 @@ impl Value {
 
     pub fn borrow(&self, vm: &mut VM) -> Value {
         match self {
-            Value::Dict(dict) => Value::Dict(match dict.clone() {
-                Dict::Map(entries, None) => {
-                    let val = Value::Dict(Dict::Map(entries, Some(vm.value_stack.len() as u32 + 1)));
-                    vm.value_stack.push(val.clone());
-                    return val;
-                },
-                Dict::Map(_, Some(id)) => Dict::Ref(id),
-                dict => dict
-            }),
-            Value::Array(arr) => Value::Array(match arr.clone() {
-                Array::Vec(vector, None) => {
-                    let val = Value::Array(Array::Vec(vector, Some(vm.value_stack.len() as u32 + 1)));
-                    vm.value_stack.push(val.clone());
-                    return val;
-                }, 
-                Array::Vec(_, Some(id)) => Array::Ref(id),
-                arr => arr
-            }),
+            Value::Dict(dict) => {
+                Value::Dict(match dict {
+                    Dict::Map(entries, None) => {
+                        let val = Value::Dict(Dict::Map(entries.clone(), Some(vm.value_stack.len() as u32 + 1)));
+                        vm.value_stack.push(val.clone());
+                        return val;
+                    },
+                    Dict::Map(_, Some(id)) => Dict::Ref(*id),
+                    dict => dict.clone()
+                })
+            },
+            Value::Array(arr) => {
+                Value::Array(match arr {
+                    Array::Vec(vector, None) => {
+                        let val = Value::Array(Array::Vec(vector.clone(), Some(vm.value_stack.len() as u32 + 1)));
+                        vm.value_stack.push(val.clone());
+                        return val;
+                    }, 
+                    Array::Vec(_, Some(id)) => Array::Ref(*id),
+                    arr => arr.clone()
+                })
+            },
             value => value.clone()
         }
     }
@@ -240,33 +240,6 @@ impl Dict {
             Dict::Ref(id) => match vm.value_stack[*id as usize].clone() {
                 Value::Dict(dict) => dict.entries(vm),
                 _ => HashMap::new()
-            }
-        }
-    }
-
-}
-
-#[derive(Clone)]
-pub enum Array {
-    Vec(Vec<Value>, Option<u32>),
-    Ref(u32)
-}
-
-impl Array {
-
-    pub fn pointer(&self) -> Option<u32> {
-        match self {
-            Array::Vec(_, id) => *id,
-            Array::Ref(id) => Some(*id)
-        }
-    }
-
-    pub fn vec(&self, vm: &mut VM) -> Vec<Value> {
-        match self {
-            Array::Vec(vec, _) => vec.clone(),
-            Array::Ref(id) => match vm.value_stack[*id as usize].clone() {
-                Value::Array(arr) => arr.vec(vm),
-                _ => vec![]
             }
         }
     }

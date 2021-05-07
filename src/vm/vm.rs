@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use std::process;
 use std::fmt;
 use super::vmcore::{ self, builtin };
-use super::vmcore::result::{ ok, err };
-use super::value::{ Value, ValueRegister, ValueIndex, ControlFlow, Dict, Array, NativeFn };
+use super::array::Array;
+use super::string;
+use super::value::{ Value, ValueRegister, ValueIndex, ControlFlow, Dict, NativeFn };
 use crate::lexer::parser::Position;
 use crate::bytecode::reader::LogicalOperator;
 use crate::common::{ fsize, get_line_col_by_line_data };
@@ -406,83 +407,21 @@ impl VM {
                         None => Ok(Value::Null)
                     },
                     Value::Str(str) => match attr {
-                        ValueIndex::Str(attr) => Ok(match attr.as_str() {
-                            "length" => Value::Num(str.chars().count() as fsize),
-                            "toLowerCase" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, _| {
-                                if let Value::Str(str) = this { Value::Str(str.to_lowercase()) } else { Value::Null }
-                            }),
-                            "toUpperCase" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, _| {
-                                if let Value::Str(str) = this { Value::Str(str.to_uppercase()) } else { Value::Null }
-                            }),
-                            "toNumber" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, vm| {
-                                if let Value::Str(str) = this {
-                                    match str.parse::<fsize>() {
-                                        Ok(num) => ok(vm, Value::Num(num)),
-                                        Err(_) => err(vm, Value::Str("Improper number.".to_string()))
-                                    }
-                                } else {
-                                    err(vm, Value::Str("Improper number.".to_string()))
-                                }
-                            }),
-                            "startsWith" => Value::NativeFn(Box::new(Value::Str(str)), |this, args, vm| {
-                                let str2 = match args.get(0) {
-                                    Some(Value::Str(str)) => str.clone(),
-                                    _ => builtin::panic("InvalidArgumentError: Expected 1 string type argument but found none.".to_string(), vm)
-                                };
-
-                                if let Value::Str(str) = this {
-                                    Value::Boolean(str.starts_with(str2.as_str()))
-                                } else {
-                                    Value::Boolean(false)
-                                }
-                            }),
-                            "endsWith" => Value::NativeFn(Box::new(Value::Str(str)), |this, args, vm| {
-                                let str2 = match args.get(0) {
-                                    Some(Value::Str(str)) => str.clone(),
-                                    _ => builtin::panic("InvalidArgumentError: Expected 1 string type argument but found none.".to_string(), vm)
-                                };
-
-                                if let Value::Str(str) = this {
-                                    Value::Boolean(str.ends_with(str2.as_str()))
-                                    
-                                } else {
-                                    Value::Boolean(false)
-                                }
-                            }),
-                            "includes" => Value::NativeFn(Box::new(Value::Str(str)), |this, args, vm| {
-                                let str2 = match args.get(0) {
-                                    Some(Value::Str(str)) => str.clone(),
-                                    _ => builtin::panic("InvalidArgumentError: Expected 1 string type argument but found none.".to_string(), vm)
-                                };
-
-                                if let Value::Str(str) = this {
-                                    Value::Boolean(str.contains(str2.as_str()))
-                                } else {
-                                    Value::Boolean(false)
-                                }
-                            }),
-                            "escapeDebug" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, _| {
-                                if let Value::Str(str) = this {
-                                    Value::Str(str.escape_debug().to_string()) 
-                                } else { Value::Null }
-                            }),
-                            "trim" => Value::NativeFn(Box::new(Value::Str(str)), |this, _, _| {
-                                if let Value::Str(str) = this { 
-                                    Value::Str(str.trim().to_string()) 
-                                } else { Value::Null }
-                            }),
-                            _ => Value::Null
-                        }),
-                        ValueIndex::Num(index) => Ok(match str.chars().nth(index.0 as usize) {
-                            Some(char) => Value::Str(char.to_string()),
-                            None => Value::Null
-                        }),
+                        ValueIndex::Str(attr) => Ok(string::get_prototype(&attr, str)),
+                        ValueIndex::Num(index) => {
+                            match str.chars().nth(index.0 as usize) {
+                                Some(char) => Ok(Value::Str(char.to_string())),
+                                None => Ok(Value::Null)
+                            }
+                        },
                         _ => Ok(Value::Null), 
                     },
                     Value::Array(arr) => match attr {
-                        ValueIndex::Num(num) => match arr.vec(self).get(num.0 as usize) {
-                            Some(val) => Ok(val.clone()),
-                            None => return Ok(Value::Null)
+                        ValueIndex::Num(num) => {
+                            match arr.vec(self).get(num.0 as usize) {
+                                Some(val) => Ok(val.clone()),
+                                None => Ok(Value::Null)
+                            }
                         },
                         _ => Ok(Value::Null)
                     },

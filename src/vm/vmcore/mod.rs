@@ -10,7 +10,6 @@ pub mod json;
 
 #[macro_export]
 macro_rules! dict {
-
     ($vm:ident, {$($key:tt: $val:expr,)+}) => {{
         let mut map = HashMap::new();
 
@@ -47,7 +46,6 @@ macro_rules! dict {
     }};
 
     ($map:ident) => { Value::Dict(Dict::Map($map, None)) };
-
 }
 
 // Arithmetic operations
