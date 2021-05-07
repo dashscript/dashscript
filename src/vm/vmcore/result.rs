@@ -47,8 +47,9 @@ pub fn ok(vm: &mut VM, val: Value) -> Value {
     dict!(vm, {
         "isOk": true,
         "isErr": false,
-        "unwrap": (val, (|this, _, _| this) as NativeFn),
+        "unwrap": (val.clone(), (|this, _, _| this) as NativeFn),
         "unwrapError": (|_, _, vm| panic("UnwrapError: Unwrapping an error when the result is ok.".to_string(), vm)) as NativeFn,
+        "unwrapOr": (val, (|this, _, _| this) as NativeFn),
     })
 }
 
@@ -58,6 +59,10 @@ pub fn err(vm: &mut VM, val: Value) -> Value {
         "isErr": true,
         "unwrapError": (val, (|this, _, _| this) as NativeFn),
         "unwrap": (|_, _, vm| panic("UnwrapError: Unwrapping result when the result is err.".to_string(), vm)) as NativeFn,
+        "unwrapOr": (|_, args, _| match args.get(0) {
+            Some(val) => val.clone(),
+            None => Value::Null
+        }) as NativeFn,
     })
 }
 
