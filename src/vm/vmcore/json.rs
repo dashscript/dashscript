@@ -142,20 +142,20 @@ pub fn stringify(value: Value, vm: &mut VM) -> String {
             let mut content = String::new();
 
             for value in arr.vec(vm) {
-                content += &format!(", {}", stringify(value, vm));
+                content += &format!(",{}", stringify(value, vm));
             }
 
             if content.len() == 0 { 
                 "[]".to_string()
             } else {
-                "[".to_string() + &content[2..] + "]"
+                "[".to_string() + &content[1..] + "]"
             }
         },
         Value::Dict(dict) => {
             let mut content = String::new();
 
             for (key, value) in dict.entries(vm) {
-                content += &format!(", {}: {}", match key {
+                content += &format!(",{}:{}", match key {
                     ValueIndex::Str(str) => format!("\"{}\"", str),
                     ValueIndex::Num(num) => num.0.to_string(),
                     ValueIndex::Boolean(bool) => format!("\"{}\"", bool),
@@ -166,7 +166,7 @@ pub fn stringify(value: Value, vm: &mut VM) -> String {
             if content.len() == 0 { 
                 "{}".to_string()
             } else {
-                "{".to_string() + &content[2..] + "}"
+                "{".to_string() + &content[1..] + "}"
             } 
         },
         Value::Func(_, _, _, _) | Value::NativeFn(_, _) => "\"[Function]\"".to_string()
