@@ -423,6 +423,7 @@ impl VM {
                                 None => Ok(Value::Null)
                             }
                         },
+                        ValueIndex::Str(attr) => Ok(Array::get_prototype(&attr, arr, self)),
                         _ => Ok(Value::Null)
                     },
                     _ => return Err(self.create_error(

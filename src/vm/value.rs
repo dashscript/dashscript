@@ -1,4 +1,5 @@
 use std::fmt;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{ Hash, Hasher };
 use crate::common::{ fsize, MAX_BYTES };
@@ -54,6 +55,22 @@ pub enum Value {
     Null
 }
 
+impl Ord for Value {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Value::Str(a), Value::Str(b)) => a.len().cmp(&b.len()),
+            (Value::Num(a), Value::Num(b)) => a.partial_cmp(&b).unwrap_or(Ordering::Equal),
+            _ => Ordering::Equal
+        }
+    }
+}
+
+impl PartialOrd for Value {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl From<bool> for Value { 
     fn from(bool: bool) -> Self { Self::Boolean(bool) } 
 }
@@ -80,6 +97,12 @@ impl From<NativeFn> for Value {
 
 impl From<(Value, NativeFn)> for Value {
     fn from(func: (Value, NativeFn)) -> Self { Self::NativeFn(Box::new(func.0), func.1) }
+}
+
+impl From<Vec<Value>> for Value {
+    fn from(vector: Vec<Value>) -> Self {
+        Self::Array(Array::Vec(vector, None))
+    }
 }
 
 impl Default for Value {

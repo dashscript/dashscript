@@ -70,7 +70,7 @@ impl BytecodeCompiler {
             ast,
             bytes: Vec::new(),
             pos_map: Vec::new(),
-            constants: vec!["window".to_string()]
+            constants: vec!["anonymous".to_string()]
         };
 
         this.parse_to_bytes();

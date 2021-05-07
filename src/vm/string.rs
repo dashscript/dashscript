@@ -97,6 +97,7 @@ pub fn get_prototype(attr: &str, this: String) -> Value {
                 Value::Str(String::new())
             }
         }),
+        // TODO(Scientific-Guy): Make a better slice function
         "split" =>  Value::NativeFn(Box::new(Value::Str(this)), |this, args, _| {
             if let Value::Str(str) = this {
                 Value::Array(
