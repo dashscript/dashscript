@@ -156,3 +156,20 @@ pub fn bool_api(_this: Value, args: Vec<Value>, _vm: &mut VM) -> Value {
         _ => Value::Boolean(true)
     }
 }
+
+pub fn assert_api(_this: Value, args: Vec<Value>, vm: &mut VM) -> Value {
+    if !match args.get(0..2) {
+        Some([Value::Dict(a), Value::Dict(b)]) => a.entries(vm) == b.entries(vm),
+        Some([Value::Array(a), Value::Array(b)]) => a.vec(vm) == b.vec(vm),
+        Some([a, b]) => a == b,
+        _ => false
+    } {
+        panic(format!(
+            "AssertionFailure: Failed equality between {} and {}", 
+            inspect(args.get(0).unwrap_or(&Value::Null).clone(), vm), 
+            inspect(args.get(1).unwrap_or(&Value::Null).clone(), vm)
+        ), vm)
+    }
+
+    Value::Null
+}

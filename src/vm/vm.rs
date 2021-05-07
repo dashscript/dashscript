@@ -882,6 +882,7 @@ impl VM {
         add_value!("readline", builtin::readline_api as NativeFn);
         add_value!("prompt", builtin::prompt_api as NativeFn);
         add_value!("confirm", builtin::confirm_api as NativeFn);
+        add_value!("assert", builtin::assert_api as NativeFn);
         add_value!("Boolean", builtin::bool_api as NativeFn);
         add_value!("Ok", result::ok_api as NativeFn);
         add_value!("Err", result::err_api as NativeFn);
@@ -931,6 +932,7 @@ impl VM {
             "sleep": window::sleep_api as NativeFn,
             "hasPermission": window::has_permission_api as NativeFn,
             "trace": window::trace_api as NativeFn,
+            "exports": Value::Dict(Dict::Map(HashMap::new(), None)),
         });
 
         if self.has_permission("env") {
