@@ -1,7 +1,5 @@
-use std::env;
+use std::{ env, process, fmt };
 use std::collections::HashMap;
-use std::process;
-use std::fmt;
 use super::vmcore::{ self, builtin };
 use super::array::Array;
 use super::string;
@@ -13,15 +11,14 @@ use crate::bytecode::main::BytecodeCompiler;
 use crate::bytecode::reader::{ BytecodeReader, InstructionValue, Instruction };
 use crate::dict;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RuntimeError {
-    pub message: String,
-    pub filename: String,
-    pub call_frames: Vec<String>,
-    pub start: usize,
-    pub end: usize,
-    pub line: usize,
-    pub col: usize
+    message: String,
+    filename: String,
+    call_frames: Vec<String>,
+    line: usize,
+    col: usize,
+    is_unknown: bool
 }
 
 impl fmt::Display for RuntimeError {
@@ -32,7 +29,11 @@ impl fmt::Display for RuntimeError {
             address += &format!("    at {}\n", frame).to_string();
         }
 
-        write!(f, "{} ({}:{}:{})\n{}", self.message, self.filename, self.line, self.col, address)
+        if self.is_unknown {
+            write!(f, "{} ({}:unknown)\n{}", self.message, self.filename, address)
+        } else {
+            write!(f, "{} ({}:{}:{})\n{}", self.message, self.filename, self.line, self.col, address)
+        }
     }
 }
 
@@ -58,9 +59,11 @@ pub struct VM {
     pub reader: BytecodeReader,
     pub frames: Vec<Frame>,
     pub value_stack: Vec<Value>,
-    pub value_register: Vec<ValueRegister>,
+    value_register: Vec<ValueRegister>,
     pub body_line_data: Vec<usize>,
-    pub flags: HashMap<String, String>
+    pub flags: HashMap<String, String>,
+    // TODO(Scientific-Guy): Get a better idea to track untracked errors from places
+    pub untracked_error: Option<RuntimeError>
 }
 
 impl VM {
@@ -77,7 +80,8 @@ impl VM {
             value_stack: Vec::<Value>::new(),
             value_register: Vec::new(),
             body_line_data: Vec::new(),
-            flags
+            flags,
+            untracked_error: None
         };
 
         for line in body.split("\n").collect::<Vec<&str>>().iter() {
@@ -101,7 +105,8 @@ impl VM {
             value_stack: Vec::<Value>::new(),
             value_register: Vec::new(),
             body_line_data: Vec::new(),
-            flags
+            flags,
+            untracked_error: None
         }
     }
 
@@ -445,19 +450,7 @@ impl VM {
                     call_params.push(val)
                 }
 
-                match call_body {
-                    Value::NativeFn(this, func) => {
-                        self.create_frame("NativeFunction".to_string());
-                        let res = Ok(func(*this, call_params, self));
-                        self.frames.pop();
-                        res
-                    },
-                    Value::Func(id, params, chunk, _) => self.execute_func(id, params, call_params, chunk),
-                    _ => Err(self.create_error(
-                        format!("UnexpectedTypeError: Type {} is not callable.", call_body.type_as_str()), 
-                        pos
-                    ))
-                }
+                self.call_function(call_body, call_params, pos)
             },
             InstructionValue::Array(vec) => {
                 let mut items = Vec::new();
@@ -794,6 +787,26 @@ impl VM {
         Ok(ControlFlow::None)
     }
 
+    pub fn call_function(&mut self, call_body: Value, call_params: Vec<Value>, pos: usize) -> Result<Value, RuntimeError> {
+        match call_body {
+            Value::NativeFn(this, func) => {
+                self.create_frame("NativeFunction".to_string());
+                let res = Ok(func(*this, call_params, self));
+                if self.untracked_error.is_some() {
+                    return Err(self.untracked_error.clone().unwrap());
+                }
+
+                self.frames.pop();
+                res
+            },
+            Value::Func(id, params, chunk, _) => self.execute_func(id, params, call_params, chunk),
+            _ => Err(self.create_error(
+                format!("UnexpectedTypeError: Type {} is not callable.", call_body.type_as_str()), 
+                pos
+            ))
+        }
+    }
+
     pub fn add_value(&mut self, name: String, mut val: Value, mutable: bool) {
         val = val.borrow(self);
         self.value_stack.push(val);
@@ -902,12 +915,11 @@ impl VM {
 
         RuntimeError {
             call_frames: self.get_stack_trace(),
-            start: pos.start,
-            end: pos.end,
             line,
             col,
             message,
-            filename: self.filename.clone()
+            filename: self.filename.clone(),
+            is_unknown: false
         }
     }
 

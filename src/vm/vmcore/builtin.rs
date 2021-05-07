@@ -20,9 +20,10 @@ pub fn inspect(val: Value, vm: &mut VM) -> String {
         Value::Null => "null".to_string(),
         Value::Func(_, _, _, _) | Value::NativeFn(_, _) => "[Function]".to_string(),
         Value::Dict(dict) => {
+            let entries = dict.entries(vm);
             let mut content = "{\n".to_string();
 
-            for entry in dict.entries(vm).iter() {
+            for entry in entries.iter() {
                 content += &format!(
                     "    {}: {},\n", 
                     match entry.0 {

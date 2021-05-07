@@ -50,11 +50,9 @@ impl Array {
 
         match attr {
             "length" => Value::Num(this.vec(vm).len() as fsize),
-            "pointer" => {
-                match this.pointer() {
-                    Some(pointer) => Value::Num(pointer as fsize),
-                    None => Value::Null
-                }
+            "pointer" => match this.pointer() {
+                Some(pointer) => Value::Num(pointer as fsize),
+                None => Value::Null
             },
             "slice" => func!(|this, args, vm| {
                 if let Value::Array(arr) = this {
