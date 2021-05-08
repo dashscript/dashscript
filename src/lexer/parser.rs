@@ -1,10 +1,72 @@
+use std::fmt;
 use crate::common::fsize;
 
+#[derive(Copy, Clone, Default)]
+pub struct Position {
+    pub start: usize,
+    pub end: usize
+}
+
+impl Position {
+
+    pub fn new(lexer: &Lexer) -> Self {
+        Self {
+            start: lexer.ci,
+            end: lexer.ci
+        }
+    }
+
+    pub fn update(&mut self, lexer: &Lexer) -> Self { 
+        self.end = lexer.ci; 
+        self.clone()
+    }
+
+}
+
+impl fmt::Debug for Position {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(fmt, "({}, {})", self.start, self.end)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
-pub enum AssignmentOp {
+pub enum Keyword {
+    Var,
+    Const,
+    Func,
+    Return,
+    If,
+    Elif,
+    Else,
+    Async,
+    Await,
+    Break,
+    While,
+    For,
+    In,
+    Continue,
+    Class,
+    Static
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AssignmentOperator {
     Assign,
     Add,
     Sub
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogicalOperator {
+    Invert,
+    Equal,
+    NotEqual,
+    GreaterThan,
+    GreaterThanOrEqual,
+    LessThan,
+    LessThanOrEqual,
+    And,
+    Or
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -14,12 +76,11 @@ pub enum TokenType {
     Number(fsize),
     String(String),
     Word(String),
-    Keyword(String),
-    Attribute(String),
+    Keyword(Keyword),
     Punc(char),
-    Arithmetic(String),
-    AssignmentOperator(AssignmentOp),
-    LogicalOperator(String)
+    Arithmetic(char),
+    AssignmentOperator(AssignmentOperator),
+    LogicalOperator(LogicalOperator)
 }
 
 #[derive(Clone, Default, Debug)]
@@ -34,12 +95,6 @@ impl Token {
     }
 }
 
-#[derive(Copy, Clone, Default, Debug)]
-pub struct Position {
-    pub start: usize,
-    pub end: usize
-}
-
 #[derive(Clone)]
 pub struct Lexer {
     pub filename: String,
@@ -52,35 +107,17 @@ pub struct Lexer {
     pub tokens: Vec<Token>
 }
 
-impl std::default::Default for TokenType {
-    fn default() -> TokenType {
-        TokenType::Null
-    }
-}
-
-impl Position {
-
-    pub fn new(lexer: &Lexer) -> Self {
-        Position {
-            start: lexer.ci,
-            end: lexer.ci
-        }
-    }
-
-    pub fn update(&mut self, lexer: &Lexer) -> Self { 
-        self.end = lexer.ci; 
-        self.clone()
-    }
-
+impl Default for TokenType {
+    fn default() -> Self { Self::Null }
 }
 
 impl Lexer {
 
-    pub fn new(filename: &String, body: &String) -> Result<Lexer, String> {
+    pub fn new(filename: &str, body: &str) -> Result<Lexer, LexerError> {
         let chars = body.chars().collect();
         let mut lexer = Lexer {
-            filename: filename.to_string(),
-            body: body.to_string(),
+            filename: filename.to_owned(),
+            body: body.to_owned(),
             chars,
             len: 0,
             line: 1,
@@ -97,7 +134,7 @@ impl Lexer {
         self.ci - self.last_line_ci
     }
 
-    pub fn parse(&mut self) -> Result<(), String> {
+    pub fn parse(&mut self) -> Result<(), LexerError> {
         self.len = self.body.len();
         let mut next_char = Some(&self.chars[self.ci]);
 
@@ -124,7 +161,7 @@ impl Lexer {
                     '\r' | ' ' => (),
                     '\n' => self.next_line(),
                     ':' | ';' | '.' | ',' |'(' | ')' | '[' | ']' | '{' | '}' | '?' => self.tokens.push(Token::new(TokenType::Punc(char), Position::new(self))),
-                    _ => return Err(create_syntax_error(self, Position::new(self), "dserror(1): No unwanted syntax."))
+                    _ => return Err(LexerError::new(self, Position::new(self), "dserror(1): No unwanted syntax."))
                 }
             }
 
@@ -142,8 +179,30 @@ impl Lexer {
 
 }
 
-pub fn create_syntax_error(lexer: &Lexer, pos: Position, reason: &str) -> String {
-    let pref: String = format!("    {}:{}:{} -> ", lexer.filename, lexer.line, lexer.get_col());
-    let body = lexer.body[pos.start as usize..lexer.ci as usize].to_string();
-    format!("SyntaxError: {}\n{}{}\n{}{}", reason, pref, body, " ".repeat(pref.len()), "^".repeat(body.len()))
+pub struct LexerError {
+    pub filename: String,
+    pub line: usize,
+    pub col: usize,
+    pub body: String,
+    pub reason: String
+}
+
+impl fmt::Display for LexerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let pref: String = format!("    {}:{}:{} -> ", self.filename, self.line, self.col);
+        write!(f, "SyntaxError: {}\n{}{}\n{}{}", self.reason, pref, self.body, " ".repeat(pref.len()), "^".repeat(self.body.len()))
+    }
+}
+
+impl LexerError {
+    pub fn new(lexer: &Lexer, pos: Position, reason: &str) -> Self {
+        let body = lexer.body[pos.start as usize..lexer.ci as usize].to_string();
+        Self {
+            filename: lexer.filename.clone(),
+            line: lexer.line,
+            col: lexer.get_col(),
+            body,
+            reason: reason.to_string()
+        }
+    }
 }

@@ -1,0 +1,13 @@
+[package]
+name = "dashscript_bytecode"
+version = "1.0.0"
+edition = "2018"
+description = "The bytecode encoder and decoder module used by the Dashscript programming language."
+homepage = "https://github.com/dashscript/dashscript"
+repository = "https://github.com/dashscript/dashscript"
+keywords = ["bytecode", "encoder", "decoder", "dashscript"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]

@@ -1,0 +1,15 @@
+[package]
+name = "dashscript_runtime"
+version = "1.0.0"
+edition = "2018"
+description = "The runtime module used by the Dashscript programming language."
+homepage = "https://github.com/dashscript/dashscript"
+repository = "https://github.com/dashscript/dashscript"
+keywords = ["runtime", "dashscript"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+serde_json = "1.0.64"
+serde = "1.0.125"

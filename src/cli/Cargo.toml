@@ -1,0 +1,15 @@
+[package]
+name = "dashscript_cli"
+version = "1.0.0"
+edition = "2018"
+description = "The cli module used by the Dashscript programming language."
+homepage = "https://github.com/dashscript/dashscript"
+repository = "https://github.com/dashscript/dashscript"
+keywords = ["cli", "dashscript"]
+
+[[bin]]
+name = "dash"
+path = "main.rs"
+
+[dependencies]
+dashscript_lexer = { path = "../lexer", version = "1.0.0" }
