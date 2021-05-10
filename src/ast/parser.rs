@@ -1,11 +1,5 @@
-use dashscript_lexer::{Token, TokenType, Keyword, AssignmentOperator, Position, LogicalOperator};
+use dashscript_lexer::{Token, TokenType, Keyword, AssignmentOperator, LogicalOperator, Position};
 use crate::{AST, ASTError, Identifier, Statement, StatementType, Condition, FuncParam};
-
-macro_rules! new_statement {
-    ($type:expr, $pos:expr) => {
-        Statement { val: $type, pos: $pos }
-    };
-}
 
 macro_rules! is_token {
     ($ast:expr, $pattern:pat) => {{
@@ -242,18 +236,18 @@ impl AST {
             Keyword::Var => {
                 let index = get_word_as_index!("dserror(3): Expected a declaration name but found nothing.");
                 consume_token!("dserror(4): Expected an assignment operator but found nothing.", TokenType::AssignmentOperator(AssignmentOperator::Assign));
-                Ok(new_statement!(
-                    StatementType::Var(index, self.parse_value("dserror(7): Expected an value before termination of the statement.")?, false), 
-                    pos
-                ))
+                Ok(Statement {
+                    val: StatementType::Var(index, self.parse_value("dserror(7): Expected an value before termination of the statement.")?, false),
+                    start_index: pos.start
+                })
             },
             Keyword::Const => {
                 let index = get_word_as_index!("dserror(3): Expected a declaration name but found nothing.");
                 consume_token!("dserror(4): Expected an assignment operator but found nothing.", TokenType::AssignmentOperator(AssignmentOperator::Assign));
-                Ok(new_statement!(
-                    StatementType::Var(index, self.parse_value("dserror(7): Expected an value before termination of the statement.")?, true), 
-                    pos
-                ))
+                Ok(Statement {
+                    val: StatementType::Var(index, self.parse_value("dserror(7): Expected an value before termination of the statement.")?, true),
+                    start_index: pos.start
+                })
             },
             Keyword::Return => {
                 self.ci += 1;
@@ -265,7 +259,7 @@ impl AST {
                             self.parse_value("dserror(22): Illegal return statement.")?
                         }
                     ),
-                    pos
+                    start_index: pos.start
                 })
             },
             Keyword::If => self.parse_condition_chain(pos),
@@ -278,7 +272,7 @@ impl AST {
                             self.parse_sub_body()?
                         )
                     ),
-                    pos
+                    start_index: pos.start
                 })
             },
             Keyword::Async => {
@@ -295,12 +289,12 @@ impl AST {
                             self.parse_sub_body()?
                         )
                     ),
-                    pos
+                    start_index: pos.start
                 })
             },
             Keyword::While => self.parse_while_loop(pos),
-            Keyword::Break => Ok(Statement { val: StatementType::Break, pos }),
-            Keyword::Continue => Ok(Statement { val: StatementType::Continue, pos }),
+            Keyword::Break => Ok(Statement { val: StatementType::Break, start_index: pos.start }),
+            Keyword::Continue => Ok(Statement { val: StatementType::Continue, start_index: pos.start }),
             Keyword::Await => {
                 self.ci += 1;
                 Ok(Statement {
@@ -309,7 +303,7 @@ impl AST {
                             Box::new(self.parse_value("dserror(32): Expected a value to await.")?)
                         )
                     ),
-                    pos
+                    start_index: pos.start
                 })
             },
             _ => Ok(Statement::default())
@@ -537,7 +531,7 @@ impl AST {
                 TokenType::AssignmentOperator(op) => {
                     self.ci += 1;
                     let stmt_type = StatementType::Assign(result, op.clone(), self.parse_value("dserror(7): Expected an value before termination of the statement.")?);
-                    return Ok(Statement { val: stmt_type, pos });
+                    return Ok(Statement { val: stmt_type, start_index: pos.start });
                 },
                 TokenType::Punc(';') => break,
                 _ => {
@@ -549,7 +543,7 @@ impl AST {
             self.ci += 1;
         }
                 
-        Ok(Statement { val: StatementType::Primary(result), pos })
+        Ok(Statement { val: StatementType::Primary(result), start_index: pos.start })
     }
 
     pub fn parse_sub_body(&mut self) -> Result<Vec<Statement>, ASTError> {
@@ -578,7 +572,7 @@ impl AST {
                 _ => {
                     let primary_stmt = Statement {
                         val: StatementType::Primary(self.parse_value("")?),
-                        pos: token.pos
+                        start_index: token.pos.start
                     };
 
                     statements.push(primary_stmt);
@@ -621,7 +615,7 @@ impl AST {
                             Token { val: TokenType::Word(name), .. },
                             Token { val: TokenType::Punc(')'), .. }
                         ]) => {
-                            params.push((name.clone(), true));
+                            params.push((self.constant_pool.add_string(name), true));
                             self.ci += 3;
                             Ok(params)
                         },
@@ -629,7 +623,7 @@ impl AST {
                     }
                 },
                 TokenType::Word(name) => {
-                    params.push((name.clone(), false));
+                    params.push((self.constant_pool.add_string(name), false));
                     can_use_comma = true;
                 },
                 _ => return Err(self.create_error(token.pos, "dserror(14): Unexpected identifier."))
@@ -655,7 +649,7 @@ impl AST {
 
         Ok(Statement { 
             val: StatementType::While(condition, self.parse_sub_body()?), 
-            pos 
+            start_index: pos.start
         })
     }
 
@@ -686,18 +680,18 @@ impl AST {
             match &token.val {
                 TokenType::Keyword(Keyword::Elif) => conditions.push(parse_partial_condition!()),
                 TokenType::Keyword(Keyword::Else) => {
-                    return Ok(Statement { val: StatementType::Condition(conditions, Some(self.parse_sub_body()?)), pos });
+                    return Ok(Statement { val: StatementType::Condition(conditions, Some(self.parse_sub_body()?)), start_index: token.pos.start });
                 },
                 _ => {
                     self.ci -= 1;
-                    return Ok(Statement { val: StatementType::Condition(conditions, None), pos });
+                    return Ok(Statement { val: StatementType::Condition(conditions, None), start_index: token.pos.start });
                 }
             }
 
             self.ci += 1;
         }
 
-        Ok(Statement { val: StatementType::Condition(conditions, None), pos })
+        Ok(Statement { val: StatementType::Condition(conditions, None), start_index: pos.start })
     }
 
 }

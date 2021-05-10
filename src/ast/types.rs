@@ -1,4 +1,4 @@
-use dashscript_lexer::{Position, AssignmentOperator};
+use dashscript_lexer::AssignmentOperator;
 
 #[derive(Debug, Clone)]
 pub enum Identifier {
@@ -40,13 +40,12 @@ pub enum ForStmt {
 
 #[derive(Debug, Clone)]
 pub enum StatementType {
-    // (constant_register_id, assigned_identifier, is_constant)
-    Var(u32, Identifier, bool),
-    Assign(Identifier, AssignmentOperator, Identifier),
-    Return(Identifier),
-    Primary(Identifier),
-    Condition(Vec<(Identifier, Vec<Statement>)>, Option<Vec<Statement>>),
-    While(Identifier, Vec<Statement>),
+    Var(u32, Identifier, bool), // (constant_register_id, assigned_identifier, is_constant)
+    Assign(Identifier, AssignmentOperator, Identifier), // (target_identifier, operator, assigned_identifier)
+    Return(Identifier), // (returned_identifier)
+    Primary(Identifier), // (primiary_identifier)
+    Condition(Vec<(Identifier, Vec<Statement>)>, Option<Vec<Statement>>), // ([(condition, [statement_to_execute])], Option([statement_to_execute]))
+    While(Identifier, Vec<Statement>), // (condition, [statement_to_execute])
     In(String, Identifier),
     For(ForStmt),
     Break,
@@ -63,7 +62,7 @@ pub enum StatementType {
 #[derive(Default, Debug, Clone)]
 pub struct Statement {
     pub val: StatementType,
-    pub pos: Position
+    pub start_index: usize
 }
 
 #[derive(Debug, Clone)]
@@ -82,4 +81,4 @@ impl Default for StatementType {
 
 pub type ClassProp = (String, Identifier, bool);
 pub type ClassMethod = (String, Vec<FuncParam>, Vec<Statement>, bool, bool);
-pub type FuncParam = (String, bool); // (name, is_rest_parameter)
+pub type FuncParam = (u32, bool); // (name, is_rest_parameter)

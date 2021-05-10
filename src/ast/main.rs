@@ -29,7 +29,7 @@ impl AST {
         };
 
         this.parse_body()?;
-        // for i in this.statements.iter() { println!("{:#?}", i); }
+        for i in this.statements.iter() { println!("{:#?}", i); }
         Ok(this.clone())
     }
 
@@ -52,7 +52,7 @@ impl AST {
                 _ => {
                     let primary_stmt = Statement {
                         val: StatementType::Primary(self.parse_value("")?),
-                        pos: token.pos
+                        start_index: token.pos.start
                     };
 
                     self.statements.push(primary_stmt);

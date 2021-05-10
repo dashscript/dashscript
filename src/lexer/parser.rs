@@ -29,6 +29,15 @@ impl fmt::Debug for Position {
     }
 }
 
+impl From<(usize, usize)> for Position {
+    fn from(pos: (usize, usize)) -> Self {
+        Self {
+            start: pos.0,
+            end: pos.1
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Keyword {
     Var,

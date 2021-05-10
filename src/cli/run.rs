@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use dashscript_lexer::Lexer;
 use dashscript_ast::AST;
+use dashscript_bytecode::BytecodeCompiler;
 use crate::read_file;
 use crate::command::Command;
 
@@ -23,11 +24,13 @@ pub fn run(cli: &Command) {
         }
     };
 
-    match AST::new(lexer) {
-        Ok(_) => (),
+    let ast = match AST::new(lexer) {
+        Ok(ast) => ast,
         Err(message) => {
             println!("{}", message);
             std::process::exit(0);
         }
-    }
+    };
+
+    let _compiled = BytecodeCompiler::new(ast);
 }

@@ -11,3 +11,4 @@ keywords = ["bytecode", "encoder", "decoder", "dashscript"]
 path = "lib.rs"
 
 [dependencies]
+dashscript_ast = { path = "../ast", version = "1.0.0" }
