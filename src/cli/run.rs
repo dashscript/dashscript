@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use dashscript_lexer::Lexer;
+use dashscript_ast::AST;
 use crate::read_file;
 use crate::command::Command;
 
@@ -14,11 +15,19 @@ pub fn run(cli: &Command) {
         Err(e) => cli.log_error(&format!("InvalidFileError: Could not read file: {:?}", e))
     };
 
-    match Lexer::new(&cli.args[2], &body) {
+    let lexer = match Lexer::new(&cli.args[2], &body) {
         Ok(lexer) => lexer,
         Err(message) => {
             println!("{}", message);
             std::process::exit(0);
         }
     };
+
+    match AST::new(lexer) {
+        Ok(_) => (),
+        Err(message) => {
+            println!("{}", message);
+            std::process::exit(0);
+        }
+    }
 }

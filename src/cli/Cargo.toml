@@ -13,3 +13,4 @@ path = "main.rs"
 
 [dependencies]
 dashscript_lexer = { path = "../lexer", version = "1.0.0" }
+dashscript_ast = { path = "../ast", version = "1.0.0" }

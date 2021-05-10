@@ -15,5 +15,5 @@ main.js
 test.exe
 test.pdb
 test.rs
-_old_*
+garbage/
 build.sh

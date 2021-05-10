@@ -1,56 +1,61 @@
 use std::fmt;
-use super::types::Statement;
-use crate::common::get_line_col_by_body;
-use crate::lexer::parser::{ Token, TokenType, Position, Lexer };
+use dashscript_lexer::{Token, TokenType, Position, Lexer};
+use crate::{Statement, ConstantPool, StatementType};
 
 #[derive(Debug, Clone)]
 pub struct AST {
     pub filename: String,
     pub statements: Vec<Statement>,
     pub tokens: Vec<Token>,
+    pub constants: Vec<String>,
     pub body: String,
     pub ci: usize,
-    pub len: usize
+    pub len: usize,
+    pub constant_pool: ConstantPool
 }
 
 impl AST {
 
-    pub fn new(lexer: &Lexer) -> Result<AST, ASTError> {
-        let this = &mut AST { 
-            filename: lexer.filename.clone(), 
+    pub fn new(lexer: Lexer) -> Result<AST, ASTError> {
+        let mut this = AST { 
+            filename: lexer.filename, 
             statements: Vec::new(),
-            tokens: lexer.tokens.clone(),
-            body: lexer.body.clone(),
+            constants: Vec::new(),
+            tokens: lexer.tokens,
+            body: lexer.body,
             ci: 0,
-            len: 0
+            len: 0,
+            constant_pool: ConstantPool::default()
         };
 
         this.parse_body()?;
-        // println!("\nStatements:\n");
         // for i in this.statements.iter() { println!("{:#?}", i); }
         Ok(this.clone())
     }
 
     pub fn parse_body(&mut self) -> Result<(), ASTError> {
         self.len = self.tokens.len();
-
         while self.ci < self.len {
             let token = self.tokens[self.ci].clone();
 
             match &token.val {
-                TokenType::Keyword(key) => {
-                    let stmt = self.get_keyword_statement(key.to_string(), token.pos)?;
+                TokenType::Keyword(keyword) => {
+                    let stmt = self.parse_keyword_statement(keyword, token.pos)?;
                     self.statements.push(stmt);
                 },
-                TokenType::Word(word) => {
+                TokenType::Word(name) => {
                     self.ci += 1;
-                    let stmt = self.get_word_statement(word.to_string(), token.pos)?;
+                    let stmt = self.parse_word_statement(name, token.pos)?;
                     self.statements.push(stmt);
                 },
                 TokenType::Punc(';') => (),
                 _ => {
-                    let stmt = self.get_value_as_stmt()?;
-                    self.statements.push(stmt);
+                    let primary_stmt = Statement {
+                        val: StatementType::Primary(self.parse_value("")?),
+                        pos: token.pos
+                    };
+
+                    self.statements.push(primary_stmt);
                 }
             }
 
@@ -59,27 +64,14 @@ impl AST {
 
         Ok(())
     }
-
-    pub fn next_token(&mut self, err: &str) -> Result<Token, ASTError> {
-        self.ci += 1;
-        match self.tokens.get(self.ci) {
-            Some(t) => Ok(t.clone()),
-            None => Err(self.create_error(self.tokens[self.ci - 2].pos, err))
-        }
-    }
-
-    pub fn current_token(&self) -> Token {
-        self.tokens[self.ci].clone()
-    }
-
+    
     pub fn create_error(&self, pos: Position, reason: &str) -> ASTError {
-        let (line, col) = get_line_col_by_body(self.body.clone(), pos.start);
-        let body = self.body[pos.start as usize - 1..pos.end as usize].to_string();
+        let (line, col) = ASTError::get_line_col(self.body.clone(), pos.start);
         ASTError {
             line,
             col,
             filename: self.filename.clone(),
-            body,
+            body: self.body[pos.start as usize - 1..pos.end as usize].to_string(),
             reason: reason.to_string()
         }
     }
@@ -92,6 +84,21 @@ pub struct ASTError {
     pub filename: String,
     pub body: String,
     pub reason: String
+}
+
+impl ASTError {
+    pub fn get_line_col(body: String, start: usize) -> (usize, usize) {
+        let lines: Vec<&str> = body.split("\n").collect();
+        let mut i = 0;
+        for line in 0..lines.len() {
+            i += lines[line].len() + 1;
+            if i > start {
+                return (line+1, i - start);
+            }
+        }
+    
+        (lines.len(), 0)
+    }
 }
 
 impl fmt::Display for ASTError {

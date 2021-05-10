@@ -1,5 +1,6 @@
 [workspace]
 members = [
     "./src/lexer",
-    "./src/cli"
+    "./src/cli",
+    "./src/ast"
 ]

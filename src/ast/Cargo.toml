@@ -11,3 +11,4 @@ keywords = ["ast", "dashscript"]
 path = "lib.rs"
 
 [dependencies]
+dashscript_lexer = { path = "../lexer", version = "1.0.0" }
