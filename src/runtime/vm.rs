@@ -1,1004 +1,221 @@
-use std::{ env, process, fmt };
+use std::convert::TryInto;
 use std::collections::HashMap;
-use super::vmcore::{ self, builtin };
-use super::array::Array;
-use super::string;
-use super::value::{ Value, ValueRegister, ValueIndex, ControlFlow, Dict, NativeFn };
-use crate::lexer::parser::Position;
-use crate::bytecode::reader::LogicalOperator;
-use crate::common::{ fsize, get_line_col_by_line_data };
-use crate::bytecode::main::BytecodeCompiler;
-use crate::bytecode::reader::{ BytecodeReader, InstructionValue, Instruction };
-use crate::dict;
+use dashscript_bytecode::{Chunk, Opcode};
+use crate::{
+    Value, ValueRegister, RuntimeResult, ErrorKind, Error, RegisterId, core
+};
 
-#[derive(Debug, Clone)]
-pub struct RuntimeError {
-    message: String,
-    filename: String,
-    call_frames: Vec<String>,
-    line: usize,
-    col: usize,
-    is_unknown: bool
-}
-
-impl fmt::Display for RuntimeError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut address = String::new();
-
-        for frame in self.call_frames.clone().into_iter().rev() {
-            address += &format!("    at {}\n", frame).to_string();
-        }
-
-        if self.is_unknown {
-            write!(f, "{} ({}:unknown)\n{}", self.message, self.filename, address)
-        } else {
-            write!(f, "{} ({}:{}:{})\n{}", self.message, self.filename, self.line, self.col, address)
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Default)]
 pub struct Frame {
-    pub vi: usize,
-    pub name: String
+    pub name: String,
+    pub id: u16
 }
 
-impl Frame {
-    pub fn new(name: String, vm: &mut VM) -> Self {
-        Self {
-            vi: vm.value_register.len(),
-            name
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct VM {
-    pub pos_map: Vec<(usize, Position)>,
-    pub filename: String,
-    pub reader: BytecodeReader,
+#[derive(Default)]
+pub struct Vm {
+    pub chunk: Chunk,
+    pub(crate) ip: usize,
+    pub(crate) error: Option<Error>,
+    pub(crate) current_scope_id: u16,
     pub frames: Vec<Frame>,
-    pub value_stack: Vec<Value>,
-    value_register: Vec<ValueRegister>,
-    pub body_line_data: Vec<usize>,
-    pub flags: HashMap<String, String>,
-    // TODO(Scientific-Guy): Get a better idea to track untracked errors from places
-    pub untracked_error: Option<RuntimeError>
+    pub value_register: HashMap<RegisterId, ValueRegister>,
 }
 
-impl VM {
+impl Vm {
 
-    pub fn new(compiler: BytecodeCompiler, filename: String, body: String, flags: HashMap<String, String>) -> Result<Self, RuntimeError> {
+    pub fn new(chunk: Chunk) -> RuntimeResult<Self> {
         let mut vm = Self {
-            pos_map: compiler.pos_map.clone(),
-            filename: filename,
-            reader: BytecodeReader::new(compiler),
-            frames: vec![Frame {
-                name: "@runtime".to_string(),
-                vi: 0
-            }],
-            value_stack: Vec::<Value>::new(),
-            value_register: Vec::new(),
-            body_line_data: Vec::new(),
-            flags,
-            untracked_error: None
+            chunk,
+            ..Default::default()
         };
 
-        for line in body.split("\n").collect::<Vec<&str>>().iter() {
-            vm.body_line_data.push(line.len());
+        core::init(&mut vm);
+        vm.new_frame("@runtime".to_string());
+        vm.execute()?;
+
+        // The vm sometimes ends with untraced errors. This is used to detect the untraced error.
+        if let Some(error) = vm.error {
+            return Err(error);
         }
 
-        vm.init_core();
-        vm.execute_body()?;
         Ok(vm)
     }
 
-    pub fn default(filename: String, flags: HashMap<String, String>) -> Self {
-        Self {
-            pos_map: Vec::new(),
-            filename,
-            reader: BytecodeReader::default(),
-            frames: vec![Frame {
-                name: "@runtime".to_string(),
-                vi: 0
-            }],
-            value_stack: Vec::<Value>::new(),
-            value_register: Vec::new(),
-            body_line_data: Vec::new(),
-            flags,
-            untracked_error: None
-        }
-    }
+    pub fn execute(&mut self) -> RuntimeResult<()> {
+        let mut next_byte = self.chunk.bytes.get(self.ip);
 
-    pub fn execute_body(&mut self) -> Result<(), RuntimeError> {
-        let mut instruction = Some(self.reader.init());
-        
-        while instruction.is_some() {
-            self.execute_instruction(instruction.unwrap())?;
-            instruction = self.reader.next();
+        while let Some(instruction) = next_byte {
+            #[allow(mutable_borrow_reservation_conflict)]
+            self.execute_instruction(*instruction)?;
+            self.ip += 1;
+            next_byte = self.chunk.bytes.get(self.ip);
         }
-        
+
         Ok(())
     }
 
-    pub fn execute_instruction(&mut self, instruction: Instruction) -> Result<(), RuntimeError> {
-        match instruction {
-            Instruction::Var(pos, name, value) => {
-                let name = self.reader.get_constant(name as usize);
-                let value = self.execute_value(value, pos)?;
-                
-                if self.value_exists(name.clone()) {
-                    return Err(self.create_error(
-                        format!("AssignmentError: Identifier {} has already declared.", name),
-                        pos
-                    ))
+    pub fn execute_instruction(&mut self, instruction: u8) -> RuntimeResult<()> {
+        
+            match Opcode::from(instruction) {
+                opcode => {
+                    return match self.execute_instruction_value(opcode) {
+                        Ok(_) => Ok(()),
+                        Err(error) => Err(error)
+                    };
                 }
-
-                self.add_value(name, value, true);
-                Ok(())
-            },
-            Instruction::Const(pos, name, value) => {
-                let name = self.reader.get_constant(name as usize);
-                let value = self.execute_value(value, pos)?;
-
-                if self.value_exists(name.clone()) {
-                    return Err(self.create_error(
-                        format!("AssignmentError: Identifier {} has already declared.", name),
-                        pos
-                    ))
-                }
-
-                self.add_value(name, value, false);
-                Ok(())
-            },
-            Instruction::Assign(pos, target, op, value) => {
-                let val = self.execute_value(value, pos)?;
-                self.execute_assignment(target, pos, val, op, true, 0)?;
-                Ok(())
-            },
-            Instruction::Value(pos, val) => {
-                self.execute_value(val, pos)?;
-                Ok(())
-            },
-            Instruction::Condition(pos, main_chain, else_chunk) => {
-                self.execute_condition_chain(main_chain, else_chunk, pos)?;
-                Ok(())
-            },
-            Instruction::While(pos, condition, chunk) => {
-                self.execute_while_loop(condition, chunk, pos)?;
-                Ok(())
-            },
-            Instruction::Return(pos, val) => {
-                println!("{}", builtin::inspect(self.execute_value(val, pos)?, self));
-                std::process::exit(0);
-            },
-            Instruction::Break => std::process::exit(0),
-            Instruction::Continue(_) => return Ok(())
-        }
+            }
+        
     }
 
-    // TODO(Scientific-Guy): Make a better assignment executor.
-    pub fn execute_assignment(
-        &mut self, 
-        value: InstructionValue, 
-        pos: usize, 
-        mut val: Value,
-        op: u8,
-        last_stack: bool,
-        id: u32
-    ) -> Result<u32, RuntimeError> {
-        match value {
-            InstructionValue::Word(i) => {
-                let old_val = self.get_value_register(i)?;
-
-                if last_stack {
-                    if !old_val.mutable {
-                        return Err(self.create_error(
-                            format!("AssignmentToConstant: You cannot assign a value to a constant"),
-                            pos
-                        ))
-                    }
-
-                    val = val.borrow(self);
-                    self.value_stack[old_val.id as usize] = match op {
-                        0 => val,
-                        1 => vmcore::add_values(self.value_stack[old_val.id as usize].clone(), val),
-                        2 => vmcore::sub_values(self.value_stack[old_val.id as usize].clone(), val, self),
-                        _ => Value::Null
-                    }.to_pointer_value(old_val.id);
-
-                    Ok(0)
-                } else {
-                    Ok(old_val.id)
-                }
-            },
-            InstructionValue::Attr(raw_target, raw_attr) => {
-                let target_id = self.execute_assignment(*raw_target, pos, val.clone(), op, false, id)? as usize;
-                let target = self.value_stack[target_id].clone();
-                let attr = self.execute_value(*raw_attr, pos)?;
-                let attr_index = attr.to_value_index();
-
-                match target.clone() {
-                    Value::Dict(dict) => {
-                        let mut entries = dict.entries(self);    
-                        let old_entry = entries.get(&attr_index);                
-
-                        match old_entry {
-                            Some((old_val, is_mutable)) => {
-                                if last_stack {
-                                    if !is_mutable {
-                                        let msg = format!("UnexpectedAttributeAccess: Property {} is readonly at {}.", builtin::inspect(attr, self), builtin::inspect(target.clone(), self));
-                                        return Err(self.create_error(msg, pos))
-                                    }
-                                    
-                                    match dict {
-                                        Dict::Ref(pointer) | Dict::Map(_, Some(pointer)) => {
-                                            // TODO(Scientific-Guy): Perform attribute value assignment without cloning entries and prevent borrow error.
-                                            let mut new_entries = entries.clone();
-                                            new_entries.insert(attr_index, (match op {
-                                                0 => val,
-                                                1 => vmcore::add_values(old_val.clone(), val),
-                                                2 => vmcore::sub_values(old_val.clone(), val, self),
-                                                _ => Value::Null
-                                            }.borrow(self), true));
-
-                                            self.value_stack[pointer as usize] = Value::Dict(Dict::Map(new_entries, Some(pointer as u32)))
-                                        },
-                                        _ => return Err(self.create_error(
-                                            format!("SegmentationFault: Unexpected kind of dict {:?}.", target),
-                                            pos
-                                        ))
-                                    }
-                                }
-    
-                                Ok(target_id as u32)
-                            },
-                            None => {
-                                if last_stack {
-                                    if op != 0 {
-                                        return Err(self.create_error(
-                                            format!(
-                                                "UnexpectedAssignment: You can only assign a value if the previous value is null but you have used a `{}` operator.",
-                                                match op {
-                                                    1 => "+=",
-                                                    2 => "-=",
-                                                    _ => "unknown"
-                                                }
-                                            ), 
-                                            pos
-                                        ))
-                                    }
-
-                                    entries.insert(attr_index, (val.borrow(self), true));
-                                    match dict {
-                                        Dict::Ref(pointer) | Dict::Map(_, Some(pointer)) => self.value_stack[pointer as usize] = Value::Dict(Dict::Map(entries, Some(pointer))),
-                                        _ => return Err(self.create_error(
-                                            format!("SegmentationFault: Unexpected kind of dict {:?}.", target),
-                                            pos
-                                        ))
-                                    }
-
-                                    Ok(0)
-                                } else {
-                                    Err(self.create_error(
-                                        "UnexpectedAttributeAccess: You cannot access attributes of null.".to_string(), 
-                                        pos
-                                    ))
-                                }
-                            }
-                        }
-                    },
-                    Value::Array(arr) => {
-                        let vector = arr.vec(self);
-
-                        match attr_index {
-                            ValueIndex::Num(raw_index) => {
-                                let old_entry = vector.get(raw_index.0 as usize);
-                                let index = raw_index.0 as usize;
-
-                                match old_entry {
-                                    Some(old_val) => {
-                                        if last_stack {
-                                            match arr {
-                                                Array::Ref(pointer) | Array::Vec(_, Some(pointer)) => {
-                                                    let mut new_vector = vector.clone();
-                                                    new_vector[index] = match op {
-                                                        0 => val,
-                                                        1 => vmcore::add_values(old_val.clone(), val),
-                                                        2 => vmcore::sub_values(old_val.clone(), val, self),
-                                                        _ => Value::Null
-                                                    }.to_pointer_value(pointer);
-
-                                                    self.value_stack[pointer as usize] = Value::Array(Array::Vec(new_vector, Some(pointer as u32)));
-                                                },
-                                                _ => return Err(self.create_error(
-                                                    format!("SegmentationFault: Unexpected kind of array {:?}.", target),
-                                                    pos
-                                                ))
-                                            }
-                                        }
-
-                                        Ok(target_id as u32)
-                                    },
-                                    None => {
-                                        if last_stack {
-                                            if op != 0 {
-                                                return Err(self.create_error(
-                                                    format!(
-                                                        "UnexpectedAssignment: You can only assign a value if the previous value is null but you have used a `{}` operator.",
-                                                        match op {
-                                                            1 => "+=",
-                                                            2 => "-=",
-                                                            _ => "unknown"
-                                                        }
-                                                    ), 
-                                                    pos
-                                                ))
-                                            }
-
-                                            let mut new_vector = vector.clone();
-                                            new_vector.resize_with(index + 1, || Value::Null);
-                                            new_vector[index] = val;
-            
-                                            match arr {
-                                                Array::Ref(pointer) | Array::Vec(_, Some(pointer)) => self.value_stack[pointer as usize] = Value::Array(Array::Vec(new_vector, Some(pointer))),
-                                                _ => return Err(self.create_error(
-                                                    format!("SegmentationFault: Unexpected kind of array {:?}.", target),
-                                                    pos
-                                                ))
-                                            }
-
-                                            Ok(0)
-                                        } else {
-                                            Err(self.create_error(
-                                                "UnexpectedAttributeAccess: You cannot access attributes of null.".to_string(), 
-                                                pos
-                                            ))
-                                        }
-                                    }
-                                }
-                            },
-                            _ => Err(self.create_error(
-                                format!("UnexpectedAttributeAccess: You cannot set attributes of type {} for array.", target.type_as_str()), 
-                                pos
-                            ))
-                        }
-                    },
-                    _ => Err(self.create_error(
-                        format!("UnexpectedAttributeAccess: You cannot set attributes of type {}.", target.type_as_str()), 
-                        pos
-                    ))
-                }
-            },
-            InstructionValue::Dict(_) | InstructionValue::Call(_, _) => return Err(self.create_error(
-                format!("UnexpectedAssignment: You cannot directly set properties. Attempt to assign it as a variable and then assign it."), 
-                pos
-            )),
-            _ => return Err(self.create_error(
-                format!("UnexpectedAssignment: Detected an unexpected assignment."), 
-                pos
-            ))
-        }
-    }
-
-    pub fn execute_value(&mut self, value: InstructionValue, pos: usize) -> Result<Value, RuntimeError> {
-        match value {
-            InstructionValue::True => Ok(Value::Boolean(true)),
-            InstructionValue::False => Ok(Value::Boolean(false)),
-            InstructionValue::Null => Ok(Value::Null),
-            InstructionValue::Group(content) => Ok(self.execute_value(*content, pos)?),
-            InstructionValue::Str(id) => Ok(Value::Str(self.reader.get_constant(id as usize))),
-            InstructionValue::Word(id) => Ok(self.get_value(id)),
-            InstructionValue::Num(num) => Ok(Value::Num(num)),
-            InstructionValue::Dict(dict_entries) => {
-                let mut entries = HashMap::new();
-                for entry in dict_entries.iter() { 
-                    let val = self.execute_value(entry.1.clone(), pos)?;
-                    entries.insert(
-                        ValueIndex::Str(self.reader.get_constant(entry.0 as usize)), 
-                        (val.borrow(self), true)
-                    );
-                }
-                
-                Ok(Value::Dict(Dict::Map(entries, None)))
-            },
-            InstructionValue::Attr(raw_body, raw_attr) => {
-                let attr = self.execute_value(*raw_attr, pos)?.to_value_index();
-                let body = self.execute_value(*raw_body, pos)?;
-
-                match body {
-                    Value::Dict(entries) => match entries.entries(self).get(&attr) {
-                        Some(val) => Ok(val.0.clone()),
-                        None => Ok(Value::Null)
-                    },
-                    Value::Str(str) => match attr {
-                        ValueIndex::Str(attr) => Ok(string::get_prototype(&attr, str)),
-                        ValueIndex::Num(index) => {
-                            match str.chars().nth(index.0 as usize) {
-                                Some(char) => Ok(Value::Str(char.to_string())),
-                                None => Ok(Value::Null)
-                            }
-                        },
-                        _ => Ok(Value::Null), 
-                    },
-                    Value::Array(arr) => match attr {
-                        ValueIndex::Num(num) => {
-                            match arr.vec(self).get(num.0 as usize) {
-                                Some(val) => Ok(val.clone()),
-                                None => Ok(Value::Null)
-                            }
-                        },
-                        ValueIndex::Str(attr) => Ok(Array::get_prototype(&attr, arr, self)),
-                        _ => Ok(Value::Null)
-                    },
-                    _ => return Err(self.create_error(
-                        format!("UnexpectedAttributeAccess: You cannot access attributes of type {}.", body.type_as_str()), 
-                        pos
-                    ))
-                }
-            },
-            InstructionValue::Call(val, params) => {
-                let call_body = self.execute_value(*val, pos)?;
-                let mut call_params = Vec::new();
-                for param in params.iter() {
-                    let val = self.execute_value(param.0.clone(), pos)?;
-                    if param.1 {
-                        call_params.extend(val.to_vec(self));
-                        continue;
-                    }
-
-                    call_params.push(val)
-                }
-
-                self.call_function(call_body, call_params, pos)
-            },
-            InstructionValue::Array(vec) => {
-                let mut items = Vec::new();
-                for item in vec { items.push(self.execute_value(item, pos)?.borrow(self)) }
-                Ok(Value::Array(Array::Vec(items, None)))
-            },
-            InstructionValue::Or(target, falsy_value) => Ok({
-                let target_val = self.execute_value(*target, pos)?;
-                if builtin::bool(target_val.clone()) {
-                    target_val
-                } else {
-                    self.execute_value(*falsy_value, pos)?
-                }
-            }),
-            InstructionValue::Func(id, params, chunk, is_async) => {
-                let name = self.reader.get_constant(id as usize);
-                let val = Value::Func(id, params, chunk.clone(), is_async);
-                if name != "anonymous".to_string() {
-                    self.add_value(name, val.clone(), false)
-                }
-
-                Ok(val)
-            },
-            InstructionValue::Invert(ident) => {
-                Ok(Value::Boolean(!builtin::bool(self.execute_value(*ident, pos)?)))
-            },
-            InstructionValue::And(ident1, ident2) => {
-                Ok(Value::Boolean(
-                    builtin::bool(self.execute_value(*ident1, pos)?) &&
-                    builtin::bool(self.execute_value(*ident2, pos)?)
-                ))
-            },
-            InstructionValue::Ternary(bool, truthy, falsy) => {
-                if builtin::bool(self.execute_value(*bool, pos)?) {
-                    self.execute_value(*truthy, pos)
-                } else {
-                    self.execute_value(*falsy, pos)
-                }
-            },
-            InstructionValue::Add(a, b) => Ok(vmcore::add_values(
-                self.execute_value(*a, pos)?,
-                self.execute_value(*b, pos)?
-            )),
-            InstructionValue::Sub(a, b) => Ok(vmcore::sub_values(
-                self.execute_value(*a, pos)?,
-                self.execute_value(*b, pos)?,
-                self
-            )),
-            InstructionValue::Mult(a, b) => Ok(vmcore::mult_values(
-                self.execute_value(*a, pos)?,
-                self.execute_value(*b, pos)?,
-                self
-            )),
-            InstructionValue::Div(a, b) => Ok(vmcore::div_values(
-                self.execute_value(*a, pos)?,
-                self.execute_value(*b, pos)?,
-                self
-            )),
-            InstructionValue::Pow(a, b) => Ok(vmcore::pow_values(
-                self.execute_value(*a, pos)?,
-                self.execute_value(*b, pos)?,
-                self
-            )),
-            InstructionValue::Condition(a, LogicalOperator::GreaterThan, b) => Ok({
-                if let (Value::Num(a), Value::Num(b)) = (self.execute_value(*a, pos)?, self.execute_value(*b, pos)?) {
-                    Value::Boolean(a > b)
-                } else {
-                    Value::Boolean(false)
-                }
-            }),
-            InstructionValue::Condition(a, LogicalOperator::LessThan, b) => Ok({
-                if let (Value::Num(a), Value::Num(b)) = (self.execute_value(*a, pos)?, self.execute_value(*b, pos)?) {
-                    Value::Boolean(a < b)
-                } else {
-                    Value::Boolean(false)
-                }
-            }),
-            InstructionValue::Condition(a, LogicalOperator::GreaterThanOrEqual, b) => Ok({
-                if let (Value::Num(a), Value::Num(b)) = (self.execute_value(*a, pos)?, self.execute_value(*b, pos)?) {
-                    Value::Boolean(a >= b)
-                } else {
-                    Value::Boolean(false)
-                }
-            }),
-            InstructionValue::Condition(a, LogicalOperator::LessThanOrEqual, b) => Ok({
-                if let (Value::Num(a), Value::Num(b)) = (self.execute_value(*a, pos)?, self.execute_value(*b, pos)?) {
-                    Value::Boolean(a <= b)
-                } else {
-                    Value::Boolean(false)
-                }
-            }),
-            InstructionValue::Condition(a, LogicalOperator::Equal, b) => Ok(Value::Boolean(self.execute_value(*a, pos)? == self.execute_value(*b, pos)?)),
-            InstructionValue::Condition(a, LogicalOperator::NotEqual, b) => Ok(Value::Boolean(self.execute_value(*a, pos)? != self.execute_value(*b, pos)?)),
-            i => Err(self.create_error(
-                format!("UnknownRuntimeError: Unexpected value while rendering: {:?}.", i), 
-                pos
-            ))
-        }
-    }
-
-    pub fn execute_func(
-        &mut self,
-        id: u32,
-        param_ids: Vec<(u32, bool)>,
-        params: Vec<Value>,
-        chunk: Vec<u8>
-    ) -> Result<Value, RuntimeError> {
-        self.create_frame(self.reader.get_constant(id as usize));
-
-        // TODO(Scientific-Guy): Make a better chunk reader instead of cloning the reader.
-        let state = self.reader.get_state();
-        self.reader.len = chunk.len();
-        self.reader.ci = 0;
-        self.reader.bytes = chunk;
-
-        for i in 0..param_ids.len() {
-            let val = {
-                if !param_ids[i].1 {
-                    match params.get(i as usize) {
-                        Some(val) => val.clone(),
-                        None => Value::Null
-                    }
-                } else {
-                    Value::Array(Array::Vec(match params.get(i..) {
-                        Some(params) => params.to_vec(),
-                        None => vec![]
-                    }, None))
-                }
-            };
-
-            self.add_value(self.reader.get_constant(param_ids[i].0 as usize), val, true);
-        }
-
-        // TODO(Scientific-Guy): Prevent unwated bytes to overlap the function code.
-        while self.reader.ci < self.reader.len {
-            match self.reader.parse_byte(self.reader.bytes[self.reader.ci]) {
-                Instruction::Return(pos, val) => {
-                    let val = self.execute_value(val, pos);
-                    self.reader.update_state(state.clone());
-                    self.remove_frame();
-                    return val;
+    pub fn execute_instruction_value(&mut self, opcode: Opcode) -> RuntimeResult<Value> {
+        Ok(
+            match opcode {
+                Opcode::True => Value::Boolean(true),
+                Opcode::False => Value::Boolean(false),
+                Opcode::Null => Value::Null,
+                Opcode::Str => {
+                    let index = self.get_u8();
+                    Value::Str(self.chunk.constants.get_string(index as u32))
                 },
-                Instruction::While(pos, condition, range) => {
-                    if let Some(val) = self.execute_while_loop(condition, range, pos)? { 
-                        self.reader.update_state(state);
-                        self.remove_frame();
-                        return Ok(val) 
-                    }
+                Opcode::StrLong => {
+                    let index = self.get_u32();
+                    Value::Str(self.chunk.constants.get_string(index))
                 },
-                Instruction::Condition(pos, main_chain, else_chunk) => {
-                    if let ControlFlow::Return(val) = self.execute_condition_chain(main_chain, else_chunk, pos)? { 
-                        self.reader.update_state(state);
-                        self.remove_frame();
-                        return Ok(val);
-                    }
+                Opcode::Word => {
+                    let index = self.get_u8();
+                    let name = self.chunk.constants.get_string(index as u32);
+                    self.value_register
+                        .get(&RegisterId(name, self.current_scope_id))
+                        .cloned()
+                        .unwrap_or_else(|| ValueRegister::default())
+                        .value
                 },
-                instruction => {
-                    self.execute_instruction(instruction)?;
-                }
-            }
-        }
+                Opcode::WordLong => {
+                    let index = self.get_u32();
+                    let name = self.chunk.constants.get_string(index);
+                    self.value_register
+                        .get(&RegisterId(name, self.current_scope_id))
+                        .cloned()
+                        .unwrap_or_else(|| ValueRegister::default())
+                        .value
+                },
+                Opcode::Call => {
+                    self.ip += 1;
+                    let byte = self.chunk.bytes[self.ip];
+                    let target = self.execute_instruction_value(Opcode::from(byte))?;
+                    println!("{:?}", target);
+                    let len = self.get_u8();
+                    let mut params = Vec::new();
 
-        self.reader.update_state(state);
-        self.remove_frame();
-        Ok(Value::Null)
-    }
-
-    pub fn execute_while_loop(
-        &mut self,
-        condition: InstructionValue,
-        chunk: Vec<u8>,
-        pos: usize
-    ) -> Result<Option<Value>, RuntimeError> {
-        let mut instructions = Vec::new();
-        let state = self.reader.get_state();
-        self.reader.ci = 0;
-        self.reader.len = chunk.len();
-        self.reader.bytes = chunk.clone();
-        self.create_frame("@while".to_string());
-
-        while self.reader.ci < self.reader.len {
-            instructions.push(self.reader.parse_byte(self.reader.bytes[self.reader.ci]));
-        }
-
-        while builtin::bool(self.execute_value(condition.clone(), pos)?) {
-            for instruction in &instructions {
-                match instruction {
-                    Instruction::Break => {
-                        self.reader.update_state(state);
-                        self.remove_frame();
-                        return Ok(None)
-                    },
-                    Instruction::Continue(_) => break,
-                    Instruction::Return(pos, value) => {
-                        self.reader.update_state(state);
-                        self.remove_frame();
-                        return Ok(Some(self.execute_value(value.clone(), *pos)?))
-                    },
-                    Instruction::Condition(pos, main_chain, else_chunk) => {
-                        match self.execute_condition_chain(main_chain.clone(), else_chunk.clone(), *pos)? {
-                            ControlFlow::None => (),
-                            ControlFlow::Return(val) => {
-                                self.reader.update_state(state);
-                                self.remove_frame();
-                                return Ok(Some(val))
+                    for _ in 0..len {
+                        match Opcode::from(self.chunk.bytes[self.ip]) {
+                            Opcode::RestParam => {
+                                let byte = self.get_u8();
+                                params.extend(self.execute_instruction_value(Opcode::from(byte))?.to_vec(self));
                             },
-                            ControlFlow::Break => {
-                                self.reader.update_state(state);
-                                self.remove_frame();
-                                return Ok(None)
+                            opcode => {
+                                let param = self.execute_instruction_value(opcode)?;
+                                params.push(param);
                             }
                         }
-                    },
-                    Instruction::While(pos, condition, chunk) => {
-                        if let Some(val) = self.execute_while_loop(condition.clone(), chunk.clone(), *pos)? { 
-                            self.reader.update_state(state);
-                            self.remove_frame();
-                            return Ok(Some(val)) 
-                        }
 
-                        self.reader.ci += 1;
-                    },
-                    _ => {
-                        self.execute_instruction(instruction.clone())?;
+                        self.ip += 1;
                     }
-                }
-            }
-        }
 
-        self.reader.update_state(state);
-        self.remove_frame();
-        Ok(None)
+                    self.call_function(target, params).unwrap_or_else(|error| self.terminate_execution(error))
+                },
+                opcode => return Err(self.create_error(ErrorKind::UnknownOpcode { opcode }, "Detected an unexpected opcode."))
+            }
+        )
     }
 
-    pub fn execute_condition_chain(
+    pub fn call_function(
         &mut self,
-        main_chain: Vec<(InstructionValue, Vec<u8>)>,
-        else_chunk: Option<Vec<u8>>,
-        pos: usize
-    ) -> Result<ControlFlow, RuntimeError> {
-        for (instruction_value, chunk) in main_chain {
-            if builtin::bool(self.execute_value(instruction_value, pos)?) {
-                let state = self.reader.get_state();
-                self.reader.ci = 0;
-                self.reader.len = chunk.len();
-                self.reader.bytes = chunk;
-                self.create_frame("@condition".to_string());
-
-                while self.reader.ci < self.reader.len {
-                    match self.reader.parse_byte(self.reader.bytes[self.reader.ci]) {
-                        Instruction::Break => {
-                            self.reader.update_state(state);
-                            self.remove_frame();
-                            return Ok(ControlFlow::Break);
-                        },
-                        Instruction::Return(pos, val) => {
-                            self.reader.update_state(state);
-                            self.remove_frame();
-                            return Ok(ControlFlow::Return(self.execute_value(val, pos)?));
-                        },
-                        Instruction::While(pos, condition, chunk) => {
-                            if let Some(val) = self.execute_while_loop(condition, chunk, pos)? {
-                                self.reader.update_state(state);
-                                self.remove_frame();
-                                return Ok(ControlFlow::Return(val));
-                            }
-                        },
-                        Instruction::Condition(pos, main_chain, else_chunk) => {
-                            match self.execute_condition_chain(main_chain, else_chunk, pos)? {
-                                ControlFlow::None => (),
-                                val => {
-                                    self.reader.update_state(state);
-                                    self.remove_frame();
-                                    return Ok(val);
-                                }
-                            }
-                        },
-                        instruction => self.execute_instruction(instruction)?
-                    }
-                }
-
-                self.reader.update_state(state);
-                self.remove_frame();
-                return Ok(ControlFlow::None);
-            }
-        }
-
-        if else_chunk.is_some() {
-            let chunk = else_chunk.unwrap();
-            let state = self.reader.get_state();
-            self.reader.ci = 0;
-            self.reader.len = chunk.len();
-            self.reader.bytes = chunk;
-            self.create_frame("@condition".to_string());
-
-            while self.reader.ci < self.reader.len {
-                match self.reader.parse_byte(self.reader.bytes[self.reader.ci]) {
-                    Instruction::Break => {
-                        self.reader.update_state(state);
-                        self.remove_frame();
-                        return Ok(ControlFlow::Break);
-                    },
-                    Instruction::Return(pos, val) => {
-                        self.reader.update_state(state);
-                        self.remove_frame();
-                        return Ok(ControlFlow::Return(self.execute_value(val, pos)?));
-                    },
-                    Instruction::While(pos, condition, chunk) => {
-                        if let Some(val) = self.execute_while_loop(condition, chunk, pos)? {
-                            self.reader.update_state(state);
-                            self.remove_frame();
-                            return Ok(ControlFlow::Return(val));
-                        }
-                    },
-                    Instruction::Condition(pos, main_chain, else_chunk) => {
-                        match self.execute_condition_chain(main_chain, else_chunk, pos)? {
-                            ControlFlow::None => (),
-                            val => {
-                                self.reader.update_state(state);
-                                self.remove_frame();
-                                return Ok(val);
-                            }
-                        }
-                    },
-                    instruction => self.execute_instruction(instruction)?
-                }
-            }
-
-            self.remove_frame();
-            self.reader.update_state(state);
-            return Ok(ControlFlow::None);
-        }
-
-        Ok(ControlFlow::None)
-    }
-
-    pub fn call_function(&mut self, call_body: Value, call_params: Vec<Value>, pos: usize) -> Result<Value, RuntimeError> {
-        match call_body {
-            Value::NativeFn(this, func) => {
-                self.create_frame("NativeFunction".to_string());
-                let res = Ok(func(*this, call_params, self));
-                if self.untracked_error.is_some() {
-                    return Err(self.untracked_error.clone().unwrap());
-                }
-
-                self.frames.pop();
-                res
+        target: Value,
+        params: Vec<Value>
+    ) -> RuntimeResult<Value> {
+        match target {
+            Value::NativeFn {
+                func,
+                ..
+            } => {
+                func.as_ref()(self, params)
             },
-            Value::Func(id, params, chunk, _) => self.execute_func(id, params, call_params, chunk),
             _ => Err(self.create_error(
-                format!("UnexpectedTypeError: Type {} is not callable.", call_body.type_as_str()), 
-                pos
+                ErrorKind::CalledAnUncallable,
+                format!("Cannot call of type {}.", target.get_type())
             ))
         }
     }
 
-    pub fn add_value(&mut self, name: String, mut val: Value, mutable: bool) {
-        val = val.borrow(self);
-        self.value_stack.push(val);
-        self.value_register.push(ValueRegister {
-            key: name,
-            id: self.value_stack.len() as u32 - 1,
-            depth: self.frames.len() as u32,
-            mutable
-        });
-    }
-
-    pub fn init_core(&mut self) {
-        use super::vmcore::{ window, result, math, date, json };
-
-        macro_rules! add_value {
-            ($name:expr, $value:expr) => {
-                self.add_value($name.to_string(), Value::from($value), false);
-            };
-        }
-
-        // Builtin functions
-        add_value!("print", builtin::print_api as NativeFn);
-        add_value!("alert", builtin::alert_api as NativeFn);
-        add_value!("typeof", builtin::print_api as NativeFn);
-        add_value!("panic", builtin::panic_api as NativeFn);
-        add_value!("readline", builtin::readline_api as NativeFn);
-        add_value!("prompt", builtin::prompt_api as NativeFn);
-        add_value!("confirm", builtin::confirm_api as NativeFn);
-        add_value!("assert", builtin::assert_api as NativeFn);
-        add_value!("Boolean", builtin::bool_api as NativeFn);
-        add_value!("Ok", result::ok_api as NativeFn);
-        add_value!("Err", result::err_api as NativeFn);
-
-        // Builtin constants
-        add_value!("inf", fsize::INFINITY);
-        add_value!("NaN", fsize::NAN);
-
-        // Bultin namespaces(dicts)
-        let math = dict!(self, {
-            "floor": math::floor_api as NativeFn,
-            "round": math::round_api as NativeFn,
-            "ceil": math::ceil_api as NativeFn,
-            "trunc": math::trunc_api as NativeFn,
-            "abs": math::abs_api as NativeFn,
-            "sqrt": math::sqrt_api as NativeFn,
-            "sin": math::sin_api as NativeFn,
-            "cos": math::cos_api as NativeFn,
-            "tan": math::tan_api as NativeFn,
-            "random": math::random_api as NativeFn,
-            "randomInt": math::random_int_api as NativeFn,
-            "randomRange": math::random_range_api as NativeFn,
-            "PI": 3.141592653589793,
-            "E": 2.718281828459045,
-        });
-
-        let date = dict!(self, { 
-            "now": date::get_current_time_ms_api as NativeFn, 
-        });
-
-        let json = dict!(self, {
-            "parse": json::parse_api as NativeFn,
-            "stringify": json::stringify_api as NativeFn,
-        });
-
-        let mut window = dict!(self, extendable {
-            "filename": self.filename.clone(),
-            "platform": env::consts::OS,
-            "arch": env::consts::ARCH,
-            "platformFamily": env::consts::FAMILY,
-            "version": "1.0.0",
-            "pid": process::id() as fsize,
-            "repl": self.flags.get("repl").is_some(),
-            "exit": window::exit_api as NativeFn,
-            "inspect": window::inspect_api as NativeFn,
-            "inspectTiny": window::inspect_tiny_api as NativeFn,
-            "sleep": window::sleep_api as NativeFn,
-            "hasPermission": window::has_permission_api as NativeFn,
-            "trace": window::trace_api as NativeFn,
-            "exports": Value::Dict(Dict::Map(HashMap::new(), None)),
-        });
-
-        if self.has_permission("env") {
-            dict!(self, extend window => {
-                "env": dict!(self, {
-                    "get": window::get_env_api as NativeFn,
-                    "set": window::set_env_api as NativeFn,
-                    "delete": window::delete_env_api as NativeFn,
-                    "all": window::all_env_api as NativeFn,
-                }),
-            });
-        }
-
-        add_value!("window", dict!(window));
-        add_value!("Math", math);
-        add_value!("Date", date);
-        add_value!("JSON", json);
-    }
-
-    pub fn has_permission(&self, name: &str) -> bool {
-        self.flags.get(&("use-".to_string() + name)).is_some()
-    }
-
-    pub fn create_error(&self, message: String, pos_id: usize) -> RuntimeError {
-        let pos = self.reader.get_position(pos_id);
-        let (line, col) = get_line_col_by_line_data(self.body_line_data.clone(), pos.start);
-
-        RuntimeError {
-            call_frames: self.get_stack_trace(),
-            line,
-            col,
-            message,
-            filename: self.filename.clone(),
-            is_unknown: false
+    pub(crate) fn get_u8(&mut self) -> u8 {
+        self.ip += 1;
+        match self.chunk.bytes.get(self.ip) {
+            Some(byte) => *byte,
+            None => {
+                self.error = Some(self.create_error(ErrorKind::DislocatedBytes, "Expected one byte to form a u8 but the chunk has an insufficient bytes."));
+                0
+            }
         }
     }
 
-    pub fn create_frame(&mut self, name: String) {
+    pub(crate) fn get_u32(&mut self) -> u32 {
+        self.ip += 1;
+        match self.chunk.bytes.get(self.ip..self.ip + 4) {
+            Some(byte) => {
+                self.ip += 4;
+                u32::from_le_bytes(byte.try_into().unwrap())
+            },
+            None => {
+                self.error = Some(self.create_error(ErrorKind::DislocatedBytes, "Expected 4 bytes to form a u32 but the chunk has an insufficient bytes."));
+                0
+            }
+        }
+    }
+    
+    pub fn create_error<S>(&self, kind: ErrorKind, message: S) -> Error 
+    where
+        S: std::string::ToString
+    {
+        Error {
+            kind,
+            message: message.to_string()
+        }
+    }
+
+    pub fn new_frame(&mut self, name: String) {
+        self.current_scope_id += 1;
         self.frames.push(Frame {
             name,
-            vi: self.value_register.len()
-        })
+            id: self.current_scope_id
+        });
     }
 
-    pub fn remove_frame(&mut self) {
-        self.value_register = self.value_register.splice(..self.frames.last().unwrap().vi, [].iter().cloned()).collect();
-        self.frames.pop();
-    }
-
-    pub fn get_stack_trace(&self) -> Vec<String> {
-        if self.flags.get("deep-stack-trace").is_some() {
-            self.frames.iter()
-            .map(|x| x.name.clone())
-            .collect()
-        } else {
-            self.frames.iter()
-            .filter(|x| !x.name.starts_with("@"))
-            .map(|x| x.name.clone())
-            .collect()
-        }
-    }
-
-    pub fn get_value(&mut self, id: u32) -> Value {
-        let mut i = self.value_register.len() - 1;
-        let key = self.reader.get_constant(id as usize);
-        let depth = self.frames.len() as u32;
-
-        loop {
-            let value = self.value_register[i].clone();
-            if (value.key == key) && (value.depth <= depth) {
-                return self.value_stack[value.id as usize].clone();
+    pub fn get_pointer(&self, id: u32) -> Value {
+        for (_, value) in self.value_register.iter() {
+            if value.id == id {
+                return value.value.clone();
             }
-
-            if i == 0 { return Value::Null }
-            i -= 1;
         }
+
+        Value::Null
     }
 
-    pub fn value_exists(&self, key: String) -> bool {
-        let mut i = self.value_register.len() - 1;
-        let depth = self.frames.len() as u32;
+    pub fn add_value(&mut self, name: String, value: Value, mutable: bool) -> Option<ValueRegister> {
+        let register = ValueRegister {
+            mutable,
+            value,
+            id: self.value_register.len() as u32
+        };
 
-        loop {
-            let value = self.value_register[i].clone();
-            if (value.key == key) && (value.depth <= depth) {
-                return true;
-            }
-
-            if i == 0 { return false }
-            i -= 1;
-        }
+        self.value_register.insert(RegisterId(name, self.current_scope_id), register)
     }
 
-    pub fn get_value_register(&mut self, id: u32) -> Result<ValueRegister, RuntimeError> {
-        let mut i = self.value_register.len() - 1;
-        let key = self.reader.get_constant(id as usize);
-        let depth = self.frames.len() as u32;
-
-        loop {
-            let value = self.value_register[i].clone();
-            if (value.key == key) && (value.depth <= depth) {
-                return Ok(value);
-            }
-
-            if i == 0 {
-                return Err(self.create_error(
-                    format!("ExpectedValueStack: Expected an value stack for {}.", key),
-                    self.reader.ci
-                ))
-            }
-
-            i -= 1;
-        }
+    pub fn terminate_execution(&mut self, error: Error) -> Value {
+        // Terminating the execution by overflowing the ip from the actual instruction array length
+        self.ip = self.chunk.bytes.len();
+        self.error = Some(error);
+        Value::Null
     }
 
 }

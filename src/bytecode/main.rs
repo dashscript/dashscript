@@ -6,6 +6,7 @@ pub struct BytecodeCompiler {
     pub bytes: Vec<u8>,
     pub pos_map: Vec<(usize, Position)>,
     pub ci: usize,
+    pub chunk_map: Vec<Vec<u8>>
 }
 
 #[repr(u8)]
@@ -53,7 +54,8 @@ pub enum Opcode {
     Continue,
     Condition,
     Long, // Used to discriminate is the index u32
-    Short // Used to discriminate is the index u8
+    Short, // Used to discriminate is the index u8
+    Load // Used to load constants
 }
 
 impl From<u8> for Opcode {
@@ -82,6 +84,7 @@ impl BytecodeCompiler {
             ast,
             bytes: Vec::new(),
             pos_map: Vec::new(),
+            chunk_map: Vec::new(),
             ci: 0
         };
 
@@ -343,10 +346,9 @@ impl BytecodeCompiler {
     }
 
     pub fn insert_byte_count(&mut self, start_index: usize) {
-        self.bytes.splice(
-            start_index..start_index, 
-            ((self.bytes.len() - start_index) as u16).to_le_bytes().iter().cloned() 
-        );
+        let bytes = self.bytes.splice(start_index.., [].iter().cloned()).collect();
+        self.chunk_map.push(bytes);
+        self.push_constant_without_op(self.bytes.len() as u32);
     }
 
 }

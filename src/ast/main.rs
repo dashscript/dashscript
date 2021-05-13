@@ -29,7 +29,7 @@ impl AST {
         };
 
         this.parse_body()?;
-        for i in this.statements.iter() { println!("{:#?}", i); }
+        // for i in this.statements.iter() { println!("{:#?}", i); }
         Ok(this.clone())
     }
 

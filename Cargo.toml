@@ -3,5 +3,6 @@ members = [
     "./src/lexer",
     "./src/cli",
     "./src/ast",
-    "./src/bytecode"
+    "./src/bytecode",
+    "./src/runtime"
 ]

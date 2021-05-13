@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 use dashscript_lexer::Lexer;
 use dashscript_ast::AST;
-use dashscript_bytecode::BytecodeCompiler;
+use dashscript_bytecode::{BytecodeCompiler, Chunk};
+use dashscript_runtime::Vm;
 use crate::read_file;
 use crate::command::Command;
 
@@ -32,5 +33,8 @@ pub fn run(cli: &Command) {
         }
     };
 
-    let _compiled = BytecodeCompiler::new(ast);
+    match Vm::new(Chunk::from(BytecodeCompiler::new(ast))) {
+        Ok(_) => (),
+        Err(e) => println!("{:?}", e)
+    };
 }

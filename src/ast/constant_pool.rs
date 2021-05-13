@@ -37,4 +37,11 @@ impl ConstantPool {
         }) as u32
     }
 
+    pub fn get_string(&self, id: u32) -> String {
+        match self.strings.get(id as usize) {
+            Some(string) => string.clone(),
+            None => String::new()
+        }
+    } 
+
 }
