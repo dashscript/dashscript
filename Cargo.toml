@@ -1,8 +1,4 @@
 [workspace]
 members = [
-    "./src/lexer",
-    "./src/cli",
-    "./src/ast",
-    "./src/bytecode",
-    "./src/runtime"
+    "./src/*"
 ]

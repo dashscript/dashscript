@@ -1,17 +1,37 @@
 use dashscript_lexer::AssignmentOperator;
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy)]
+pub enum BinaryOperator {
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Power,
+    Rem,
+    Or,
+    And,
+    GreaterThan,
+    GreaterThanOrEqual,
+    LessThan,
+    LessThanOrEqual,
+    Equal,
+    NotEqual,
+}
+
+impl BinaryOperator {
+    pub const VARIANT_SIZE: u8 = BinaryOperator::NotEqual as u8;
+}
+
 #[derive(Debug, Clone)]
 pub enum Identifier {
     String(u32), // (constant_register_id)
-    Number(u32), // (constant_register_id)
+    Int(u32), // (constant_register_id)
+    Float(u32), // (constant_register_id)
     Word(u32), // (constant_register_id)
     Attribute(Box<Identifier>, Box<Identifier>), // (target_identifier, key_identifier)
     Call(Box<Identifier>, Vec<(Identifier, bool)>), // (target_identifier, [(param_identifier, is_rest_parameter)])
-    Add(Box<Identifier>, Box<Identifier>), // (lhs_identifier, rhs_identifier)
-    Subtract(Box<Identifier>, Box<Identifier>), // (lhs_identifier, rhs_identifier)
-    Multiply(Box<Identifier>, Box<Identifier>), // (lhs_identifier, rhs_identifier)
-    Divide(Box<Identifier>, Box<Identifier>), // (lhs_identifier, rhs_identifier)
-    Pow(Box<Identifier>, Box<Identifier>), // (lhs_identifier, rhs_identifier)
+    BinaryOperation(Box<Identifier>, BinaryOperator, Box<Identifier>), // (lhs_identifier, binary_operator, rhs_identifier)
     Ternary(Box<Identifier>, Box<Identifier>, Box<Identifier>), // (target_identifier, thruthy_identifier, faly_identifier)
     Boolean(bool), // (boolean)
     Array(Vec<Identifier>), // [value_identifier]
@@ -19,12 +39,8 @@ pub enum Identifier {
     Group(Box<Identifier>), // (grouped_identifier)
     Func(u32, Vec<FuncParam>, Vec<Statement>), // (constant_register_id, [function_param], [statement])
     AsyncFunc(u32, Vec<FuncParam>, Vec<Statement>), // (constant_register_id, [function_param], [statement])
-    Or(Box<Identifier>, Box<Identifier>), // (lhs_identifier, rhs_identifier)
-    And(Box<Identifier>, Box<Identifier>), // (lhs_identifier, rhs_identifier)
     Invert(Box<Identifier>), // (indentifier_to_invert)
-    Condition(Box<Identifier>, Condition, Box<Identifier>), // (lhs_identifier, condition, rhs_identifier)
     Await(Box<Identifier>), // (target_identifier)
-    In(Box<Identifier>, Box<Identifier>),
     Null
 }
 
@@ -63,16 +79,6 @@ pub enum StatementType {
 pub struct Statement {
     pub val: StatementType,
     pub start_index: usize
-}
-
-#[derive(Debug, Clone)]
-pub enum Condition {
-    GreaterThan,
-    GreaterThanOrEqual,
-    LessThan,
-    LessThanOrEqual,
-    Equal,
-    NotEqual,
 }
 
 impl Default for StatementType {

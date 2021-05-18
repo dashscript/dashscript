@@ -8,16 +8,16 @@ pub fn inspect(vm: &mut Vm, value: Value) -> RuntimeResult<String> {
             Value::Null => "null".to_string(),
             Value::Boolean(boolean) => boolean.to_string(),
             Value::Dict(dict) => {
-                let mut content = String::from("{");
+                let mut content = String::from("{\n");
                 for (key, value) in dict.entries(vm) {
-                    content += &format!("    {}: {},", key.to_string(), tiny_inspect(value.0))
+                    content += &format!("    {}: {},\n", key.to_string(), value.0.to_string())
                 }
                 content + "}"
             },
             Value::Array(array) => {
-                let mut content = String::from("[");
+                let mut content = String::from("[\n");
                 for item in array.vec(vm) {
-                    content += &format!("    {},", tiny_inspect(item))
+                    content += &format!("    {},\n", item.to_string())
                 }
                 content + "]"
             },
@@ -25,17 +25,4 @@ pub fn inspect(vm: &mut Vm, value: Value) -> RuntimeResult<String> {
             Value::Fn { is_async: true, .. } => "[AsyncFunction]".to_string(),
         }
     )
-}
-
-pub fn tiny_inspect(value: Value) -> String {
-    match value {
-        Value::Str(string) => string,
-        Value::Num(number) => number.to_string(),
-        Value::Null => "null".to_string(),
-        Value::Boolean(boolean) => boolean.to_string(),
-        Value::Dict(_) => "[Object]".to_string(),
-        Value::Array(_) => "[Array]".to_string(),
-        Value::Fn { is_async: false, .. } | Value::NativeFn { .. } => "[Function]".to_string(),
-        Value::Fn { is_async: true, .. } => "[AsyncFunction]".to_string(),
-    }
 }

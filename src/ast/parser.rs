@@ -1,5 +1,5 @@
 use dashscript_lexer::{Token, TokenType, Keyword, AssignmentOperator, LogicalOperator, Position};
-use crate::{AST, ASTError, Identifier, Statement, StatementType, Condition, FuncParam};
+use crate::{AST, ASTError, Identifier, Statement, StatementType, BinaryOperator, FuncParam};
 
 macro_rules! is_token {
     ($ast:expr, $pattern:pat) => {{
@@ -51,7 +51,8 @@ impl AST {
                     let index = self.constant_pool.add_string(string);
                     result = self.parse_identifier_as_object(Identifier::String(index))?
                 },
-                TokenType::Number(num) if is_null => result = Identifier::Number(self.constant_pool.add_number(*num)),
+                TokenType::Int(int) if is_null => result = Identifier::Int(self.constant_pool.add_int(*int)),
+                TokenType::Float(float) if is_null => result = Identifier::Float(self.constant_pool.add_float(*float)),
                 TokenType::Boolean(bool) if is_null => result = Identifier::Boolean(*bool),
                 TokenType::Punc('[') if is_null => {
                     self.ci += 1;
@@ -69,27 +70,30 @@ impl AST {
                     self.ci += 1;
                     let next = self.parse_value("dserror(13): Improper arithmetic equation.")?;
                     match char {
-                        '+' => result = Identifier::Add(Box::new(result), Box::new(next)),
-                        '-' => result = Identifier::Subtract(Box::new(result), Box::new(next)),
-                        '*' => result = Identifier::Multiply(Box::new(result), Box::new(next)),
-                        '/' => result = Identifier::Divide(Box::new(result), Box::new(next)),
-                        '^' => result = Identifier::Pow(Box::new(result), Box::new(next)),
-                        _ => ()
+                        '+' => result = Identifier::BinaryOperation(Box::new(result), BinaryOperator::Add, Box::new(next)),
+                        '-' => result = Identifier::BinaryOperation(Box::new(result), BinaryOperator::Subtract, Box::new(next)),
+                        '*' => result = Identifier::BinaryOperation(Box::new(result), BinaryOperator::Multiply, Box::new(next)),
+                        '/' => result = Identifier::BinaryOperation(Box::new(result), BinaryOperator::Divide, Box::new(next)),
+                        '^' => result = Identifier::BinaryOperation(Box::new(result), BinaryOperator::Power, Box::new(next)),
+                        '%' => result = Identifier::BinaryOperation(Box::new(result), BinaryOperator::Rem, Box::new(next)),
+                        _ => result = Identifier::Null
                     };
                 },
                 TokenType::LogicalOperator(op) => {
                     match op {
                         LogicalOperator::Or => {
                             self.ci += 1;
-                            result = Identifier::Or(
+                            result = Identifier::BinaryOperation(
                                 Box::new(result), 
+                                BinaryOperator::Or,
                                 Box::new(self.parse_value("dserror(28): Expected value after `or` logical operator.")?)
                             );
                         },
                         LogicalOperator::And => {
                             self.ci += 1;
-                            result = Identifier::And(
+                            result = Identifier::BinaryOperation(
                                 Box::new(result), 
+                                BinaryOperator::And,
                                 Box::new(self.parse_value("dserror(28): Expected value after `and` logical operator.")?)
                             );
                         },
@@ -101,43 +105,49 @@ impl AST {
                         },
                         LogicalOperator::Equal => {
                             self.ci += 1;
-                            result = Identifier::Condition(
-                                Box::new(result), Condition::Equal,
+                            result = Identifier::BinaryOperation(
+                                Box::new(result), 
+                                BinaryOperator::Equal,
                                 Box::new(self.parse_value("dserror(7): Expected an value before termination of the statement.")?)
                             );
                         },
                         LogicalOperator::NotEqual => {
                             self.ci += 1;
-                            result = Identifier::Condition(
-                                Box::new(result), Condition::NotEqual,
+                            result = Identifier::BinaryOperation(
+                                Box::new(result), 
+                                BinaryOperator::NotEqual,
                                 Box::new(self.parse_value("dserror(7): Expected an value before termination of the statement.")?)
                             );
                         },
                         LogicalOperator::GreaterThan => {
                             self.ci += 1;
-                            result = Identifier::Condition(
-                                Box::new(result), Condition::GreaterThan,
+                            result = Identifier::BinaryOperation(
+                                Box::new(result), 
+                                BinaryOperator::GreaterThan,
                                 Box::new(self.parse_value("dserror(7): Expected an value before termination of the statement.")?)
                             );
                         },
                         LogicalOperator::GreaterThanOrEqual => {
                             self.ci += 1;
-                            result = Identifier::Condition(
-                                Box::new(result), Condition::GreaterThanOrEqual,
+                            result = Identifier::BinaryOperation(
+                                Box::new(result), 
+                                BinaryOperator::GreaterThanOrEqual,
                                 Box::new(self.parse_value("dserror(7): Expected an value before termination of the statement.")?)
                             );
                         },
                         LogicalOperator::LessThan => {
                             self.ci += 1;
-                            result = Identifier::Condition(
-                                Box::new(result), Condition::LessThan,
+                            result = Identifier::BinaryOperation(
+                                Box::new(result), 
+                                BinaryOperator::LessThan,
                                 Box::new(self.parse_value("dserror(7): Expected an value before termination of the statement.")?)
                             );
                         },
                         LogicalOperator::LessThanOrEqual => {
                             self.ci += 1;
-                            result = Identifier::Condition(
-                                Box::new(result), Condition::LessThanOrEqual,
+                            result = Identifier::BinaryOperation(
+                                Box::new(result), 
+                                BinaryOperator::LessThanOrEqual,
                                 Box::new(self.parse_value("dserror(7): Expected an value before termination of the statement.")?)
                             );
                         },
@@ -322,10 +332,7 @@ impl AST {
                         Box::new(
                             Identifier::String(
                                 match self.tokens.get(self.ci) {
-                                    Some(Token { val: TokenType::Word(name), .. }) => {
-                                        self.ci += 1;
-                                        self.constant_pool.add_string(name)
-                                    },
+                                    Some(Token { val: TokenType::Word(name), .. }) => self.constant_pool.add_string(name),
                                     _ => return Err(self.create_error(self.tokens[self.ci - 1].pos, "dserror(2): Found an improper attribute declaration."))
                                 }
                             )
@@ -504,10 +511,7 @@ impl AST {
                         Box::new(
                             Identifier::String(
                                 match self.tokens.get(self.ci) {
-                                    Some(Token { val: TokenType::Word(name), .. }) => {
-                                        self.ci += 1;
-                                        self.constant_pool.add_string(name)
-                                    },
+                                    Some(Token { val: TokenType::Word(name), .. }) => self.constant_pool.add_string(name),
                                     _ => return Err(self.create_error(self.tokens[self.ci - 1].pos, "dserror(2): Found an improper attribute declaration."))
                                 }
                             )

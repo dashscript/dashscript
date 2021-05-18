@@ -1,4 +1,4 @@
-use crate::{Value, Vm, ToValue};
+use crate::{Value, Vm};
 
 #[derive(Clone)]
 pub enum Array {
@@ -21,7 +21,7 @@ impl Array {
         }
     }
 
-    pub fn vec(&self, vm: &mut Vm) -> Vec<Value> {
+    pub fn vec(&self, vm: &Vm) -> Vec<Value> {
         match self {
             Array::Vec(vec, _) => vec.clone(),
             Array::Ref(id) => match vm.get_pointer(*id) {
@@ -29,19 +29,6 @@ impl Array {
                 _ => vec![]
             }
         }
-    }
-
-    pub fn from_iter<I, V>(iter: I) -> Vec<Value> 
-    where
-        I: IntoIterator<Item = V>,
-        V: ToValue
-    {
-        let mut vector = vec![];
-        for item in iter {
-            vector.push(Value::from(item));
-        }
-
-        vector
     }
 
 }

@@ -105,7 +105,7 @@ impl Lexer {
                                     return Ok(());
                                 } else { TokenType::Arithmetic(char) }
                             }
-                            '+' | '/' | '*' | '^' => TokenType::Arithmetic(char),
+                            '+' | '/' | '*' | '^' | '%' => TokenType::Arithmetic(char),
                             '=' => TokenType::AssignmentOperator(AssignmentOperator::Assign),
                             '!' => TokenType::LogicalOperator(LogicalOperator::Invert),
                             '>' => TokenType::LogicalOperator(LogicalOperator::GreaterThan),
@@ -129,12 +129,16 @@ impl Lexer {
     pub fn parse_number(&mut self, pref: String) -> Result<Token, LexerError> {
         let mut content = String::from(pref);
         let mut start = Position::new(self);
+        let mut is_float = false;
 
         while self.ci < self.len {
             let char = self.chars[self.ci];
 
-            if (char >= '0' && char <= '9') || (char == '.' && content.find('.').is_none()) {
+            if char >= '0' && char <= '9' {
                 content += &char.to_string();
+            } else if char == '.' && content.find('.').is_none() {
+                content +=  &char.to_string();
+                is_float = true;
             // TODO(Scientific-Guy): Make a better exponent expression parser.
             } else if char == 'e' {
                 let initial_number: fsize = content.parse().unwrap();
@@ -153,24 +157,28 @@ impl Lexer {
                 macro_rules! parse_e_expression {
                     () => {
                         Ok(Token::new(
-                            TokenType::Number(
-                                match op {
-                                    '+' => initial_number * (10.0 as fsize).powf(exponent_number.parse().unwrap()),
-                                    // The method is here made through string formatting
-                                    // because the number loses its precision
-                                    '-' => {
-                                        let factoral = match content.split('.').collect::<Vec<&str>>().get(1) {
-                                            Some(x) => x.to_string(),
-                                            None => String::new()
-                                        };
-    
+                            match op {
+                                '+' => if is_float {
+                                    TokenType::Float(initial_number * 10_usize.pow(exponent_number.parse().unwrap()) as fsize)
+                                } else {
+                                    TokenType::Int(initial_number as isize * 10_isize.pow(exponent_number.parse().unwrap()))
+                                },
+                                // The method is here made through string formatting
+                                // because the number loses its precision
+                                '-' => {
+                                    let factoral = match content.split('.').collect::<Vec<&str>>().get(1) {
+                                        Some(x) => x.to_string(),
+                                        None => String::new()
+                                    };
+
+                                    TokenType::Float(
                                         format!("0.{}{}{}", "0".repeat(initial_number as usize - factoral.len()), initial_number as u32, factoral)
-                                        .parse::<fsize>()
-                                        .unwrap()
-                                    },
-                                    _ => 0.0
-                                }
-                            ),
+                                            .parse::<fsize>()
+                                            .unwrap()
+                                    )
+                                },
+                                _ => TokenType::Int(0)
+                            },
                             start.update(self)
                         ))
                     };
@@ -196,13 +204,31 @@ impl Lexer {
                 }
             } else {
                 self.ci -= 1;
-                return Ok(Token::new(TokenType::Number(content.parse().unwrap()), start.update(self)));
+                return Ok(
+                    Token::new(
+                        if is_float {
+                            TokenType::Float(content.parse().unwrap())
+                        } else {
+                            TokenType::Int(content.parse().unwrap())
+                        },
+                        start.update(self)
+                    )
+                )
             }
 
             self.ci += 1;
         }
 
-        Ok(Token::new(TokenType::Number(content.parse().unwrap()), start.update(self)))
+        Ok(
+            Token::new(
+                if is_float {
+                    TokenType::Float(content.parse().unwrap())
+                } else {
+                    TokenType::Int(content.parse().unwrap())
+                },
+                start.update(self)
+            )
+        )
     }
 
 }

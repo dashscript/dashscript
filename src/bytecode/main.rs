@@ -1,6 +1,6 @@
-use dashscript_ast::{Position, AST, StatementType, Statement, Identifier, Condition};
+use dashscript_ast::{Position, AST, StatementType, Statement, Identifier};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BytecodeCompiler {
     pub ast: AST,
     pub bytes: Vec<u8>,
@@ -19,60 +19,38 @@ pub enum Opcode {
     StrLong, // The longer index for string
     Word,
     WordLong, // The longer index of word
-    Num,
-    NumLong, // The longer index of number
+    Int,
+    IntLong, // The longer index of int
+    Float,
+    FloatLong, // The longer index of float
     Var,
     Const,
     Assign,
     Call,
     Attr,
-    Add,
-    Sub,
-    Mult,
-    Div,
-    Pow,
     Ternary,
     Array,
     Dict,
     Group, 
     Await, 
     Invert,
-    Or,
-    And,
     In,
     Func,
     RestParam,
     Return,
-    GreaterThan,
-    GreaterThanOrEqual,
-    LessThan,
-    LessThanOrEqual,
-    Equal,
-    NotEqual,
     While,
     Break,
     Continue,
     Condition,
+    BinaryOperation,
     Long, // Used to discriminate is the index u32
     Short, // Used to discriminate is the index u8
-    Load // Used to load constants
 }
 
 impl From<u8> for Opcode {
     fn from(byte: u8) -> Opcode {
-        unsafe { std::mem::transmute::<u8, Opcode>(byte) }
-    }
-}
-
-impl From<&Condition> for Opcode {
-    fn from(condition: &Condition) -> Opcode {
-        match condition {
-            Condition::Equal => Opcode::Equal,
-            Condition::NotEqual => Opcode::NotEqual,
-            Condition::GreaterThan => Opcode::GreaterThan,
-            Condition::GreaterThanOrEqual => Opcode::GreaterThanOrEqual,
-            Condition::LessThan => Opcode::LessThanOrEqual,
-            Condition::LessThanOrEqual => Opcode::LessThanOrEqual
+        unsafe { 
+            std::mem::transmute::<u8, Opcode>(byte) 
         }
     }
 }
@@ -80,14 +58,7 @@ impl From<&Condition> for Opcode {
 impl BytecodeCompiler {
 
     pub fn new(ast: AST) -> Self {
-        let mut this = Self { 
-            ast,
-            bytes: Vec::new(),
-            pos_map: Vec::new(),
-            chunk_map: Vec::new(),
-            ci: 0
-        };
-
+        let mut this = Self { ast, ..Default::default() };
         this.parse_to_bytes();
         this
     }
@@ -175,7 +146,8 @@ impl BytecodeCompiler {
     pub fn load_identifier(&mut self, ident: &Identifier) {
         match ident {
             Identifier::String(register_index) => self.push_constant(Opcode::Str, Opcode::StrLong, *register_index),
-            Identifier::Number(register_index) => self.push_constant(Opcode::Num, Opcode::NumLong, *register_index),
+            Identifier::Int(register_index) => self.push_constant(Opcode::Int, Opcode::IntLong, *register_index),
+            Identifier::Float(register_index) => self.push_constant(Opcode::Float, Opcode::FloatLong, *register_index),
             Identifier::Word(register_index) => self.push_constant(Opcode::Word, Opcode::WordLong, *register_index),
             Identifier::Call(ident, params) => {
                 self.bytes.push(Opcode::Call as u8);
@@ -196,30 +168,10 @@ impl BytecodeCompiler {
             },
             Identifier::Boolean(bool) => self.bytes.push(if *bool { Opcode::True } else { Opcode::False } as u8),
             Identifier::Null => self.bytes.push(Opcode::Null as u8),
-            Identifier::Add(a, b) => {
-                self.bytes.push(Opcode::Add as u8);
-                self.load_identifier(a);
-                self.load_identifier(b);
-            },
-            Identifier::Subtract(a, b) => {
-                self.bytes.push(Opcode::Sub as u8);
-                self.load_identifier(a);
-                self.load_identifier(b);
-            },
-            Identifier::Multiply(a, b) => {
-                self.bytes.push(Opcode::Mult as u8);
-                self.load_identifier(a);
-                self.load_identifier(b);
-            },
-            Identifier::Divide(a, b) => {
-                self.bytes.push(Opcode::Div as u8);
-                self.load_identifier(a);
-                self.load_identifier(b);
-            },
-            Identifier::Pow(a, b) => {
-                self.bytes.push(Opcode::Pow as u8);
-                self.load_identifier(a);
-                self.load_identifier(b);
+            Identifier::BinaryOperation(lhs, binary_operator, rhs) => {
+                self.bytes.extend_from_slice(&[Opcode::BinaryOperation as u8, *binary_operator as u8]);
+                self.load_identifier(lhs);
+                self.load_identifier(rhs);
             },
             Identifier::Ternary(target, truthy, falsy) => {
                 self.bytes.push(Opcode::Ternary as u8);
@@ -289,26 +241,6 @@ impl BytecodeCompiler {
             Identifier::Invert(ident) => {
                 self.bytes.push(Opcode::Invert as u8);
                 self.load_identifier(ident)
-            },
-            Identifier::And(a, b) => {
-                self.bytes.push(Opcode::And as u8);
-                self.load_identifier(a);
-                self.load_identifier(b);
-            },
-            Identifier::Or(a, b) => {
-                self.bytes.push(Opcode::Or as u8);
-                self.load_identifier(a);
-                self.load_identifier(b);
-            },
-            Identifier::In(a, b) => {
-                self.bytes.push(Opcode::In as u8);
-                self.load_identifier(a);
-                self.load_identifier(b);
-            },
-            Identifier::Condition(a, condition_operator, b) => {
-                self.bytes.push(Opcode::from(condition_operator) as u8);
-                self.load_identifier(a);
-                self.load_identifier(b);
             }
         }
     }

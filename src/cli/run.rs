@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 use dashscript_lexer::Lexer;
 use dashscript_ast::AST;
-use dashscript_bytecode::{BytecodeCompiler, Chunk};
+use dashscript_bytecode::BytecodeCompiler;
 use dashscript_runtime::Vm;
-use crate::read_file;
 use crate::command::Command;
+use crate::read_file;
 
-pub fn run(cli: &Command) {
+pub fn run(cli: &mut Command) {
     if cli.args.len() <= 2 {
         cli.log_error("InvalidFileError: No file name specified.");
     }
@@ -33,7 +33,15 @@ pub fn run(cli: &Command) {
         }
     };
 
-    match Vm::new(Chunk::from(BytecodeCompiler::new(ast))) {
+    macro_rules! insert_flag {
+        ($name:expr, $value:expr) => {
+            cli.flags.insert($name.into(), $value)
+        };
+    }
+
+    insert_flag!("filename", cli.args[2].clone());
+
+    match Vm::new(BytecodeCompiler::new(ast).into(), cli.flags.clone()) {
         Ok(_) => (),
         Err(e) => println!("{:?}", e)
     };

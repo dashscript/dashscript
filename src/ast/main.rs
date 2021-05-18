@@ -2,7 +2,7 @@ use std::fmt;
 use dashscript_lexer::{Token, TokenType, Position, Lexer};
 use crate::{Statement, ConstantPool, StatementType};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AST {
     pub filename: String,
     pub statements: Vec<Statement>,

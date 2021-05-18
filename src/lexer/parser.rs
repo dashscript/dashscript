@@ -82,7 +82,8 @@ pub enum LogicalOperator {
 pub enum TokenType {
     Null,
     Boolean(bool),
-    Number(fsize),
+    Int(isize),
+    Float(fsize),
     String(String),
     Word(String),
     Keyword(Keyword),
@@ -166,7 +167,7 @@ impl Lexer {
                         let str = self.parse_string(char)?;
                         self.tokens.push(str);
                     },
-                    '+' | '-' | '=' | '/' | '*' | '^' | '!' | '|' | '<' | '>' | '&' => self.parse_op(char)?,
+                    '+' | '-' | '=' | '/' | '*' | '^' | '!' | '|' | '<' | '>' | '&' | '%' => self.parse_op(char)?,
                     '\r' | ' ' => (),
                     '\n' => self.next_line(),
                     ':' | ';' | '.' | ',' |'(' | ')' | '[' | ']' | '{' | '}' | '?' => self.tokens.push(Token::new(TokenType::Punc(char), Position::new(self))),
