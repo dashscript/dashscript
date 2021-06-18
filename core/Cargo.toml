@@ -1,0 +1,15 @@
+[package]
+name = "dashscript_core"
+version = "1.0.0"
+edition = "2018"
+description = "The core module used by the Dashscript programming language."
+homepage = "https://github.com/dashscript/dashscript"
+repository = "https://github.com/dashscript/dashscript"
+keywords = ["core", "dashscript"]
+
+[features]
+stress_gc = []
+
+[dependencies]
+serde_json = "1.0.64"
+serde = "1.0.125"
