@@ -1,0 +1,13 @@
+[package]
+name = "dashscript_lexer"
+version = "1.0.0"
+edition = "2018"
+description = "The lexer module used by the Dashscript programming language."
+homepage = "https://github.com/dashscript/dashscript"
+repository = "https://github.com/dashscript/dashscript"
+keywords = ["lexer", "dashscript"]
+
+[lib]
+path = "lib.rs"
+
+[dependencies]

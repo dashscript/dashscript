@@ -12,8 +12,10 @@ main.ds
 main.exe
 main.pdb
 main.js
+main.jsc
 test.exe
 test.pdb
 test.rs
-_old_*
+garbage/
 build.sh
+test/
