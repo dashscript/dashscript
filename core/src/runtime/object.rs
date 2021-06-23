@@ -29,11 +29,11 @@ macro_rules! impl_default_object_trait {
 }
 
 pub type Map = HashMap<Value, (Value, bool)>;
-pub type NativeFunctionHandler = fn (&mut Vm, Vec<Value>) -> RuntimeResult<Value>;
+pub type NativeFunctionHandler = fn (&mut Vm, &[Value]) -> RuntimeResult<Value>;
 
 #[derive(Clone)]
 pub struct NativeFunction {
-    pub(crate) func: fn (vm: &mut Vm, args: Vec<Value>) -> RuntimeResult<Value>,
+    pub(crate) func: NativeFunctionHandler,
     pub(crate) is_instance: bool,
     pub(crate) name: TinyString
 }
@@ -61,7 +61,7 @@ impl Debug for NativeFunction {
 #[derive(Debug, Clone)]
 pub struct Function {
     pub(crate) name: TinyString,
-    pub(crate) upvalues: Vec<Upvalue>,
+    pub(crate) upvalues: Box<[Upvalue]>,
     pub(crate) start: usize,
     pub(crate) max_slots: u8,
     pub(crate) flags: u8
@@ -70,6 +70,12 @@ pub struct Function {
 impl Function {
     pub fn is_instance(&self) -> bool {
         self.flags & FunctionFlags::INSTANCE == FunctionFlags::INSTANCE
+    }
+
+    pub fn to_instance(&mut self) {
+        if self.flags & FunctionFlags::INSTANCE != FunctionFlags::INSTANCE {
+            self.flags |= FunctionFlags::INSTANCE;
+        }
     }
 }
 

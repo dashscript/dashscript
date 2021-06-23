@@ -6,30 +6,25 @@ macro_rules! methods {
 
 pub mod iterator {
 
-    use std::ptr::NonNull;
     use crate::{Vm, Value, TinyString, ValueIter};
     use crate::runtime::core::map_builder::MapBuilder;
 
     pub fn init(vm: &mut Vm) {
         methods!(vm.iterator_methods, {
-            "clone" => |vm, iterator, _| {
-                let ptr = vm.allocate(iterator.clone());
-                Ok(Value::Iterator(unsafe { NonNull::new_unchecked(ptr) }))
-            },
-            "next" => |_, iterator, _| Ok(
+            "clone" => |vm, iterator, _, _| Ok(Value::Iterator(vm.allocate_value_ptr(iterator.clone()))),
+            "current" => |_, iterator, _, _| Ok(iterator.current()),
+            "next" => |_, iterator, _, _| Ok(
                 match iterator.next() {
                     Some(value) => value,
                     None => Value::Null
                 }
             ),
-            "current" => |_, iterator, _| Ok(iterator.current()),
         });
 
         let mut iterator_object = MapBuilder::new(vm);
 
         iterator_object.native_fn("empty", |vm, _| {
-            let ptr = unsafe { NonNull::new_unchecked(vm.allocate(ValueIter::default())) };
-            Ok(Value::Iterator(ptr))
+            Ok(Value::Iterator(vm.allocate_value_ptr(ValueIter::default())))
         });
 
         iterator_object.native_fn("from", |vm, args| {
@@ -38,10 +33,10 @@ pub mod iterator {
                 None => ValueIter::default()
             };
 
-            Ok(Value::Dict(unsafe { NonNull::new_unchecked(vm.allocate(iter)) }))
+            Ok(Value::Iterator(vm.allocate_value_ptr(iter)))
         });
 
-        let iterator = Value::Dict(iterator_object.allocate_non_null());
+        let iterator = Value::Dict(iterator_object.allocate_value_ptr());
         vm.add_global("Iterator", iterator);
     }
 
@@ -49,22 +44,20 @@ pub mod iterator {
 
 pub mod string {
 
-    use std::ptr::NonNull;
     use std::ops::Deref;
     use crate::{Vm, Value, TinyString};
-    use crate::runtime::memory::{unwrap_str};
     use crate::runtime::core::map_builder::MapBuilder;
 
     pub fn init(vm: &mut Vm) {
         methods!(vm.string_methods, {
-            "len" => |_, string, _| Ok(Value::Int(string.len() as isize)),
-            "isEmpty" => |_, string, _| Ok(Value::Bool(string.len() == 0)),
-            "toLowerCase" => |vm, string, _| Ok(Value::String(vm.allocate_string(string.deref().to_lowercase()))),
-            "toUpperCase" => |vm, string, _| Ok(Value::String(vm.allocate_string(string.deref().to_uppercase()))),
-            "trim" => |vm, string, _| Ok(Value::String(vm.allocate_static_str(string.deref().trim()))),
-            "trimStart" => |vm, string, _| Ok(Value::String(vm.allocate_static_str(string.deref().trim_start()))),
-            "trimEnd" => |vm, string, _| Ok(Value::String(vm.allocate_static_str(string.deref().trim_end()))),
-            "charCodeAt" => |_, string, args| Ok(
+            "len" => |_, string, _, _| Ok(Value::Int(string.len() as isize)),
+            "isEmpty" => |_, string, _, _| Ok(Value::Bool(string.len() == 0)),
+            "toLowerCase" => |vm, string, _, _| Ok(Value::String(vm.allocate_string(string.deref().to_lowercase()))),
+            "toUpperCase" => |vm, string, _, _| Ok(Value::String(vm.allocate_string(string.deref().to_uppercase()))),
+            "trim" => |vm, string, _, _| Ok(Value::String(vm.allocate_static_str(string.deref().trim()))),
+            "trimStart" => |vm, string, _, _| Ok(Value::String(vm.allocate_static_str(string.deref().trim_start()))),
+            "trimEnd" => |vm, string, _, _| Ok(Value::String(vm.allocate_static_str(string.deref().trim_end()))),
+            "charCodeAt" => |_, string, _, args| Ok(
                 match args.get(0) {
                     Some(&Value::Int(index)) if index >= 0 => {
                         match string.char_code_at(index as usize) {
@@ -75,7 +68,7 @@ pub mod string {
                     _ => Value::Null
                 }
             ),
-            "charCount" => |_, string, _| {
+            "charCount" => |_, string, _, _| {
                 let mut count = 0;
                 for _ in string.chars() {
                     count += 1;
@@ -83,44 +76,44 @@ pub mod string {
 
                 Ok(Value::Int(count))
             },
-            "endsWith" => |_, string, args| Ok(Value::Bool(
+            "endsWith" => |_, string, _, args| Ok(Value::Bool(
                 match args.get(0) {
-                    Some(&Value::String(a)) => string.deref().ends_with(unwrap_str(a.as_ptr())),
+                    Some(Value::String(a)) => string.deref().ends_with(a.unwrap_ref() as &str),
                     _ => false
                 }
             )),
-            "startsWith" => |_, string, args| Ok(Value::Bool(
+            "startsWith" => |_, string, _, args| Ok(Value::Bool(
                 match args.get(0) {
-                    Some(&Value::String(a)) => string.deref().starts_with(unwrap_str(a.as_ptr())),
+                    Some(&Value::String(a)) => string.deref().starts_with(a.unwrap_ref() as &str),
                     _ => false
                 }
             )),
-            "split" => |vm, string, args| Ok(
+            "split" => |vm, string, _, args| Ok(
                 match args.get(0) {
                     Some(&Value::String(a)) => {
                         let mut result = Vec::new();
-                        for item in string.deref().split(unwrap_str(a.as_ptr())) {
+                        for item in string.deref().split(a.unwrap_ref() as &str) {
                             result.push(Value::String(vm.allocate_static_str(item)));
                         }
 
-                        Value::Array(unsafe { NonNull::new_unchecked(vm.allocate(result)) })
+                        Value::Array(vm.allocate_value_ptr(result))
                     },
                     _ => Value::Null
                 }
             ),
-            "includes" => |_, string, args| Ok(Value::Bool(
+            "includes" => |_, string, _, args| Ok(Value::Bool(
                 match args.get(0) {
-                    Some(&Value::String(a)) => string.deref().contains(unwrap_str(a.as_ptr())),
+                    Some(&Value::String(a)) => string.deref().contains(a.unwrap_ref() as &str),
                     _ => false
                 }
             )),
-            "repeat" => |vm, string, args| Ok(
+            "repeat" => |vm, string, _, args| Ok(
                 match args.get(0) {
                     Some(times) => Value::String(vm.allocate_string(string.deref().repeat(times.to_usize()))),
                     _ => Value::Null
                 }
             ),
-            "slice" => |vm, string, args| Ok(
+            "slice" => |vm, string, _, args| Ok(
                 match args.get(0..2) {
                     Some(&[start, end]) => {
                         match string.deref().get(start.to_usize()..end.to_usize()) {
@@ -131,14 +124,14 @@ pub mod string {
                     _ => Value::Null
                 }
             ),
-            "toBytes" => |vm, string, _| {
+            "toBytes" => |vm, string, _, _| {
                 let mut bytes = Vec::new();
 
                 for byte in string.to_bytes() {
                     bytes.push(Value::Int(*byte as isize));
                 }
 
-                Ok(Value::Array(unsafe { NonNull::new_unchecked(vm.allocate(bytes)) }))
+                Ok(Value::Array(vm.allocate_value_ptr(bytes)))
             },
         });
 
@@ -160,7 +153,7 @@ pub mod string {
             match args.get(0) {
                 Some(value) => {
                     match std::char::from_u32(value.to_u32()) {
-                        Some(char_) => Value::String(vm.allocate_str(TinyString::new(char_.encode_utf8(&mut [0; 4]).as_bytes()))),
+                        Some(char_) => Value::String(vm.allocate_value_ptr(TinyString::new(char_.encode_utf8(&mut [0; 4]).as_bytes()))),
                         None => Value::Null
                     }
                 },
@@ -168,7 +161,7 @@ pub mod string {
             }
         ));
 
-        let string = Value::Dict(string_object.allocate_non_null());
+        let string = Value::Dict(string_object.allocate_value_ptr());
         vm.add_global("String", string)
     }
 
@@ -189,7 +182,7 @@ pub mod boolean {
             }
         )));
 
-        let boolean = Value::Dict(boolean_object.allocate_non_null());
+        let boolean = Value::Dict(boolean_object.allocate_value_ptr());
         vm.add_global("Boolean", boolean);
     }
 
@@ -197,17 +190,17 @@ pub mod boolean {
 
 pub mod object {
 
-    use crate::{Vm, Value, GcHeader, Map, RuntimeError, RuntimeErrorKind};
+    use crate::{Vm, Value, RuntimeError, RuntimeErrorKind};
     use crate::runtime::core::map_builder::MapBuilder; 
 
     pub fn init(vm: &mut Vm) {
         let mut object_ = MapBuilder::new(vm);
 
-        object_.native_fn("defineProperty", |_, args| {
+        object_.native_fn("defineProperty", |vm, args| {
             match args.get(0..3) {
-                Some(&[Value::Dict(ptr), key, value]) => unsafe {
-                    if let Some((_, true)) = GcHeader::unwrap_mut::<Map>(ptr.as_ptr()).insert(key, (value, false)) {
-                        return Err(RuntimeError::new_untraced(RuntimeErrorKind::CannotAssignToReadonlyProperty))
+                Some(&[Value::Dict(ptr), key, value]) => {
+                    if let Some((_, true)) = ptr.unwrap_mut().insert(key, (value, false)) {
+                        return Err(RuntimeError::new(vm, RuntimeErrorKind::CannotAssignToReadonlyProperty))
                     }
                 },
                 _ => ()
@@ -218,8 +211,8 @@ pub mod object {
 
         object_.native_fn("defineReadonlyProperty", |_, args| {
             match args.get(0..3) {
-                Some(&[Value::Dict(ptr), key, value]) => unsafe {
-                    if let Some((_, true)) = GcHeader::unwrap_mut::<Map>(ptr.as_ptr()).insert(key, (value, true)) {
+                Some(&[Value::Dict(ptr), key, value]) => {
+                    if let Some((_, true)) = ptr.unwrap_mut().insert(key, (value, true)) {
                         return Err(RuntimeError::new_untraced(RuntimeErrorKind::CannotAssignToReadonlyProperty))
                     }
                 },
@@ -229,10 +222,28 @@ pub mod object {
             Ok(Value::Null)
         });
 
-        object_.native_fn("convertIntoReadonlyProperties", |_, args| Ok(
+        object_.native_fn("defineMethod", |vm, args| {
+            match args.get(0..3) {
+                Some(&[Value::Dict(ptr), key, value]) => {
+                    match value {
+                        Value::Function(ptr) => ptr.unwrap_mut().to_instance(),
+                        _ => return Err(RuntimeError::new_str(vm, "Expected (object, string, function[non-native]) arguments."))
+                    };
+
+                    if let Some((_, true)) = ptr.unwrap_mut().insert(key, (value, true)) {
+                        return Err(RuntimeError::new_kind(vm, RuntimeErrorKind::CannotAssignToReadonlyProperty))
+                    }
+                },
+                _ => ()
+            }
+
+            Ok(Value::Null)
+        });
+
+        object_.native_fn("convertIntoReadonlyObject", |_, args| Ok(
             match args.get(0) {
-                Some(Value::Dict(ptr)) => unsafe {
-                    for (_, value) in GcHeader::unwrap_mut::<Map>(ptr.as_ptr()).iter_mut() {
+                Some(Value::Dict(ptr)) => {
+                    for (_, value) in ptr.unwrap_mut().iter_mut() {
                         *value = (value.0, true);
                     }
 
@@ -244,13 +255,13 @@ pub mod object {
 
         object_.native_fn("entries", |vm, args| Ok(
             match args.get(0) {
-                Some(Value::Dict(ptr)) => unsafe {
+                Some(Value::Dict(ptr)) => {
                     let mut entries = Vec::new();
-                    for (key, value) in GcHeader::unwrap_ref::<Map>(ptr.as_ptr()) {
-                        entries.push(Value::Array(vm.allocate_non_null(vec![*key, value.0])))
+                    for (key, value) in ptr.unwrap_ref() {
+                        entries.push(Value::Array(vm.allocate_value_ptr(vec![*key, value.0])))
                     }
 
-                    Value::Array(vm.allocate_non_null(entries))
+                    Value::Array(vm.allocate_value_ptr(entries))
                 },
                 _ => Value::Null
             }
@@ -258,13 +269,13 @@ pub mod object {
 
         object_.native_fn("keys", |vm, args| Ok(
             match args.get(0) {
-                Some(Value::Dict(ptr)) => unsafe {
+                Some(Value::Dict(ptr)) => {
                     let mut keys = Vec::new();
-                    for (key, _) in GcHeader::unwrap_ref::<Map>(ptr.as_ptr()) {
+                    for (key, _) in ptr.unwrap_ref() {
                         keys.push(*key);
                     }
 
-                    Value::Array(vm.allocate_non_null(keys))
+                    Value::Array(vm.allocate_value_ptr(keys))
                 },
                 _ => Value::Null
             }
@@ -272,28 +283,40 @@ pub mod object {
 
         object_.native_fn("values", |vm, args| Ok(
             match args.get(0) {
-                Some(Value::Dict(ptr)) => unsafe {
+                Some(Value::Dict(ptr)) => {
                     let mut values = Vec::new();
-                    for (_, (value, _)) in GcHeader::unwrap_ref::<Map>(ptr.as_ptr()) {
+                    for (_, (value, _)) in ptr.unwrap_ref() {
                         values.push(*value);
                     }
 
-                    Value::Array(vm.allocate_non_null(values))
+                    Value::Array(vm.allocate_value_ptr(values))
                 },
                 _ => Value::Null
             }
         ));
+
+        object_.native_fn("remove", |vm, args| {
+            match args.get(0) {
+                Some(Value::Dict(ptr)) => {
+                    let map = ptr.unwrap_mut();
+                    for key in args.get(1..).unwrap() {
+                        map.remove(key);
+                    }
+
+                    Ok(Value::Null)
+                },
+                _ => return Err(RuntimeError::new_str(vm, "Wanted (object, ..keys) arguments."))
+            }
+        });
 
         object_.native_fn("clone", |vm, args| Ok(
             match args.get(0) {
-                Some(Value::Dict(ptr)) => unsafe {
-                    Value::Dict(vm.allocate_non_null(GcHeader::unwrap::<Map>(ptr.as_ptr())))
-                },
+                Some(Value::Dict(ptr)) => Value::Dict(vm.allocate_value_ptr(ptr.unwrap())),
                 _ => Value::Null
             }
         ));
 
-        let object = Value::Dict(object_.allocate_non_null());
+        let object = Value::Dict(object_.allocate_value_ptr());
         vm.add_global("Object", object);
     }
 
@@ -301,12 +324,12 @@ pub mod object {
 
 pub mod function {
 
-    use crate::{Vm, Value, NativeFunction, TinyString, GcHeader, Function};
+    use crate::{Vm, Value, NativeFunction, TinyString};
     use crate::runtime::core::map_builder::MapBuilder;
 
     pub fn init(vm: &mut Vm) {
         let mut function_object = MapBuilder::new(vm);
-        let noop = function_object.vm.allocate_non_null(NativeFunction {
+        let noop = function_object.vm.allocate_value_ptr(NativeFunction {
             func: |_, _| Ok(Value::Null),
             is_instance: false,
             name: TinyString::new(b"noop")
@@ -314,10 +337,10 @@ pub mod function {
 
         function_object.constant("noop", Value::NativeFn(noop));
 
-        function_object.native_fn("getName", |vm, args| unsafe {
+        function_object.native_fn("getName", |vm, args| {
             let name = match args.get(0) {
-                Some(Value::Function(ptr)) => GcHeader::unwrap_ref::<Function>(ptr.as_ptr()).name.to_bytes(),
-                Some(Value::NativeFn(ptr)) => GcHeader::unwrap_ref::<NativeFunction>(ptr.as_ptr()).name.to_bytes(),
+                Some(Value::Function(ptr)) => ptr.unwrap_ref().name.to_bytes(),
+                Some(Value::NativeFn(ptr)) => ptr.unwrap_ref().name.to_bytes(),
                 _ => return Ok(Value::Null)
             };
 
@@ -331,7 +354,7 @@ pub mod function {
             }
         )));
 
-        let function = Value::Dict(function_object.allocate_non_null());
+        let function = Value::Dict(function_object.allocate_value_ptr());
         vm.add_global("Function", function);
     }
 
@@ -339,33 +362,42 @@ pub mod function {
 
 pub mod array {
 
-    use crate::{Vm, Value, GcHeader, TinyString, ValueIter};
-    use crate::runtime::memory::{unwrap_tiny_string_ref, unwrap_str_bytes};
+    use crate::{Vm, Value, TinyString, ValuePtr};
     use crate::runtime::core::map_builder::MapBuilder;
+    
+    fn ptr_as_value_array(ptr: *const u8) -> Value {
+        Value::Array(ValuePtr::new_unchecked(ptr))
+    }
 
     pub fn init(vm: &mut Vm) {
         methods!(vm.array_methods, {
-            "len" => |_, array, _| Ok(Value::Int(array.len() as isize)),
-            "clone" => |vm, array, _| Ok(Value::Array(vm.allocate_non_null(array.clone()))),
-            "concat" => |vm, array, args| Ok(
+            "len" => |_, array, _, _| Ok(Value::Int(array.len() as isize)),
+            "clone" => |vm, array, _,  _| Ok(Value::Array(vm.allocate_value_ptr(array.clone()))),
+            "isEmpty" => |_, array, _, _| Ok(Value::Bool(array.len() == 0)),
+            "concat" => |vm, array, ptr, args| Ok(
                 match args.get(0) {
-                    Some(Value::Array(ptr)) => unsafe {
+                    Some(Value::Array(ptr)) => {
                         let mut array = array.clone();
-                        array.extend(GcHeader::unwrap_ref::<Vec<Value>>(ptr.as_ptr()));
-                        Value::Array(vm.allocate_non_null(array))
+                        array.extend(ptr.unwrap_ref());
+
+                        Value::Array(vm.allocate_value_ptr(array))
                     },
-                    _ => Value::Array(vm.allocate_non_null(array.clone()))
+                    _ => ptr_as_value_array(ptr)
                 }
             ),
-            "extend" => |_, array, args| {
+            "extend" => |_, array, ptr, args| {
+                array.extend_from_slice(args);
+                Ok(ptr_as_value_array(ptr))
+            },
+            "extendFromArray" => |_, array, ptr, args| {
                 match args.get(0) {
-                    Some(Value::Array(ptr)) => unsafe { array.extend(GcHeader::unwrap_ref::<Vec<Value>>(ptr.as_ptr())) },
+                    Some(Value::Array(ptr)) => array.extend(ptr.unwrap_ref()),
                     _ => ()
                 }
 
-                Ok(Value::Null)
+                Ok(ptr_as_value_array(ptr))
             },
-            "forEach" => |vm, array, args| {
+            "forEach" => |vm, array, _, args| {
                 let mut index = 0;
                 let function = match args.get(0) {
                     Some(value) => *value,
@@ -374,17 +406,16 @@ pub mod array {
                 
                 for item in array.iter() {
                     vm.stack.extend_from_slice(&[*item, Value::Int(index)]);
-                    if let Err(error) = vm.call_function(function, 2) {
+                    if let Err(error) = vm.call_function_with_returned_value(function, 2) {
                         return Err(error);
                     }
 
-                    vm.stack.pop();
                     index += 1;
                 }
 
                 Ok(Value::Null)
             },
-            "filter" => |vm, array, args| {
+            "filter" => |vm, array, _, args| {
                 let mut index = 0;
                 let mut values = Vec::new();
                 let function = match args.get(0) {
@@ -394,20 +425,17 @@ pub mod array {
 
                 for &item in array.iter() {
                     vm.stack.extend_from_slice(&[item, Value::Int(index)]);
-                    if let Err(error) = vm.call_function(function, 2) {
-                        return Err(error);
-                    }
-
-                    if vm.stack.pop().unwrap_or(Value::Null).to_bool() {
-                        values.push(item);
+                    match vm.call_function_with_returned_value(function, 2) {
+                        Ok(value) => values.push(value),
+                        Err(error) => return Err(error)
                     }
 
                     index += 1;
                 }
 
-                Ok(Value::Array(vm.allocate_non_null(values)))
+                Ok(Value::Array(vm.allocate_value_ptr(values)))
             },
-            "find" => |vm, array, args| {
+            "find" => |vm, array, _, args| {
                 let mut index = 0;
                 let function = match args.get(0) {
                     Some(value) => *value,
@@ -416,12 +444,13 @@ pub mod array {
                 
                 for &item in array.iter() {
                     vm.stack.extend_from_slice(&[item, Value::Int(index)]);
-                    if let Err(error) = vm.call_function(function, 2) {
-                        return Err(error);
-                    }
-
-                    if vm.stack.pop().unwrap_or(Value::Null).to_bool() {
-                        return Ok(item);
+                    match vm.call_function_with_returned_value(function, 2) {
+                        Ok(value) => {
+                            if value.to_bool() {
+                                return Ok(item);
+                            }
+                        },
+                        Err(error) => return Err(error)
                     }
 
                     index += 1;
@@ -429,7 +458,7 @@ pub mod array {
 
                 Ok(Value::Null)
             },
-            "findIndex" => |vm, array, args| {
+            "findIndex" => |vm, array, _, args| {
                 let mut index = 0;
                 let function = match args.get(0) {
                     Some(value) => *value,
@@ -438,12 +467,13 @@ pub mod array {
                 
                 for &item in array.iter() {
                     vm.stack.extend_from_slice(&[item, Value::Int(index)]);
-                    if let Err(error) = vm.call_function(function, 2) {
-                        return Err(error);
-                    }
-
-                    if vm.stack.pop().unwrap_or(Value::Null).to_bool() {
-                        return Ok(Value::Int(index));
+                    match vm.call_function_with_returned_value(function, 2) {
+                        Ok(value) => {
+                            if value.to_bool() {
+                                return Ok(Value::Int(index))
+                            }
+                        },
+                        Err(error) => return Err(error)
                     }
 
                     index += 1;
@@ -451,7 +481,7 @@ pub mod array {
 
                 Ok(Value::Int(-1))
             },
-            "includes" => |_, array, args| {
+            "includes" => |_, array, _, args| {
                 let value = match args.get(0) {
                     Some(value) => *value,
                     None => return Ok(Value::Null)
@@ -465,7 +495,7 @@ pub mod array {
 
                 Ok(Value::Bool(false))
             },
-            "indexOf" => |_, array, args| {
+            "indexOf" => |_, array, _, args| {
                 let mut index = 0;
                 let value = match args.get(0) {
                     Some(value) => *value,
@@ -482,7 +512,7 @@ pub mod array {
 
                 Ok(Value::Int(-1))
             },
-            "lastIndexOf" => |_, array, args| {
+            "lastIndexOf" => |_, array, _, args| {
                 let mut index = 0;
                 let mut result = -1;
                 let value = match args.get(0) {
@@ -500,9 +530,9 @@ pub mod array {
 
                 Ok(Value::Int(result))
             },
-            "join" => |vm, array, args| {
+            "join" => |vm, array, _, args| {
                 let seperator = match args.get(0) {
-                    Some(Value::String(ptr)) if array.len() != 0 => unwrap_str_bytes(ptr.as_ptr()),
+                    Some(Value::String(ptr)) if array.len() != 0 => ptr.unwrap_bytes(),
                     _ => return Ok(Value::String(vm.allocate_str_bytes(&[])))
                 };
 
@@ -523,7 +553,7 @@ pub mod array {
 
                 Ok(Value::String(vm.allocate_str_bytes(bytes.as_slice())))
             },
-            "map" => |vm, array, args| {
+            "map" => |vm, array, _, args| {
                 let mut index = 0;
                 let mut result = Vec::new();
                 let function = match args.get(0) {
@@ -533,21 +563,20 @@ pub mod array {
                 
                 for &item in array.iter() {
                     vm.stack.extend_from_slice(&[item, Value::Int(index)]);
-                    if let Err(error) = vm.call_function(function, 2) {
-                        return Err(error);
+                    match vm.call_function_with_returned_value(function, 2) {
+                        Ok(value) => result.push(value),
+                        Err(error) => return Err(error)
                     }
 
-                    result.push(vm.stack.pop().unwrap_or(Value::Null));
                     index += 1;
                 }
 
-                Ok(Value::Array(vm.allocate_non_null(result)))
+                Ok(Value::Array(vm.allocate_value_ptr(result)))
             },
-            "pop" => |_, array, _| {
-                array.pop();
-                Ok(Value::Null)
+            "pop" => |_, array, _, _| {
+                Ok(array.pop().unwrap_or(Value::Null))
             },
-            "push" => |_, array, args| {
+            "push" => |_, array, _, args| {
                 let value = match args.get(0) {
                     Some(value) => *value,
                     None => Value::Null
@@ -556,28 +585,27 @@ pub mod array {
                 array.push(value);
                 Ok(value)
             },
-            "reverse" => |vm, array, _| {
-                let mut array = array.clone();
+            "reverse" => |_, array, ptr, _| {
                 array.reverse();
-                Ok(Value::Array(vm.allocate_non_null(array)))
+                Ok(ptr_as_value_array(ptr))
             },
-            "resize" => |_, array, args| {
+            "resize" => |_, array, ptr, args| {
                 array.resize_with(match args.get(0) {
                     Some(&Value::Int(int)) if int >= 0 => int as usize,
                     Some(&Value::Float(float)) if float >= 0.0 => float as usize,
                     _ => 0
                 }, || Value::Null);
 
-                Ok(Value::Null)
+                Ok(ptr_as_value_array(ptr))
             },
-            "remove" => |_, array, args| {
+            "remove" => |_, array, ptr, args| {
                 array.remove(match args.get(0) {
                     Some(&Value::Int(int)) if int >= 0 => int as usize,
                     Some(&Value::Float(float)) if float >= 0.0 => float as usize,
                     _ => 0
                 });
 
-                Ok(Value::Null)
+                Ok(ptr_as_value_array(ptr))
             },
         });
 
@@ -589,7 +617,7 @@ pub mod array {
                 Some(Value::String(ptr)) => {
                     let mut chars = Vec::new();
 
-                    for u32_ in unwrap_tiny_string_ref(ptr.as_ptr()).chars() {
+                    for u32_ in ptr.unwrap_ref().chars() {
                         let char_ = match std::char::from_u32(u32_) {
                             Some(character) => character,
                             None => std::char::REPLACEMENT_CHARACTER 
@@ -598,19 +626,19 @@ pub mod array {
                         chars.push(Value::String(vm.allocate_static_str(char_.encode_utf8(&mut [0; 4]))));
                     }
 
-                    vm.allocate_non_null(chars)
+                    vm.allocate_value_ptr(chars)
                 },
-                Some(Value::Iterator(ptr)) => unsafe {
+                Some(Value::Iterator(ptr)) => {
                     let mut items = Vec::new();
-                    let iter = GcHeader::unwrap_mut::<ValueIter>(ptr.as_ptr());
+                    let iter = ptr.unwrap_mut();
 
                     while let Some(item) = iter.next()  {
                         items.push(item);
                     }
 
-                    vm.allocate_non_null(items)
+                    vm.allocate_value_ptr(items)
                 },
-                _ => vm.allocate_non_null(Vec::new())
+                _ => vm.allocate_value_ptr(Vec::new())
             }
         )));
 
@@ -623,10 +651,10 @@ pub mod array {
 
             let mut array = Vec::with_capacity(cap);
             array.resize_with(cap, || Value::Null);
-            Ok(Value::Array(vm.allocate_non_null(array)))
+            Ok(Value::Array(vm.allocate_value_ptr(array)))
         });
 
-        let array = Value::Dict(array_object.allocate_non_null());
+        let array = Value::Dict(array_object.allocate_value_ptr());
         vm.add_global("Array", array);
     }
 

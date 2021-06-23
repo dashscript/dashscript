@@ -303,17 +303,14 @@ impl AST {
     pub fn keyword_function(&mut self, index: usize, is_async: bool) -> Stmt {
         let (name, parameters) = match self.next_token().kind {
             TokenKind::Word(name) => {
-                let params = match self.next_token().kind {
-                    TokenKind::ParenOpen => self.expression_function_params(),
+                match self.next_token().kind {
+                    TokenKind::ParenOpen => (self.constant_pool.add_string(name), self.expression_function_params()),
                     _ => {
                         unexpected_token!(self, ASTErrorKind::ExpectedIdent, self.current);
                         return Stmt::default();
                     }
-                };
-
-                (self.constant_pool.add_string(name), params)
+                }
             },
-            TokenKind::ParenOpen => (0, self.expression_function_params()),
             _ => {
                 unexpected_token!(self, ASTErrorKind::ExpectedIdent, self.current);
                 return Stmt::default();
@@ -405,6 +402,7 @@ impl AST {
 
                     expr
                 },
+                TokenKind::Keyword(Keyword::Func) => self.expression_function(false),
                 _ => {
                     self.error(token.position, kind);
                     Expr::Null
@@ -439,6 +437,7 @@ impl AST {
 
                 expr
             },
+            TokenKind::Keyword(Keyword::Func) => self.expression_function(false),
             _ => {
                 unexpected_token!(self, kind, token);
                 Expr::Null
@@ -547,6 +546,31 @@ impl AST {
                 Some(token) => token,
                 None => return expr
             };
+        }
+    }
+
+    pub fn expression_function(&mut self, is_async: bool) -> Expr {
+        let parameters = match self.next_token().kind {
+            TokenKind::ParenOpen => self.expression_function_params(),
+            _ => {
+                unexpected_token!(self, ASTErrorKind::ExpectedIdent, self.current);
+                return Expr::Null;
+            }
+        };
+
+        match self.next_token().kind {
+            TokenKind::CurlyBraceOpen => {
+                Expr::Function {
+                    name: 0,
+                    parameters,
+                    inner: self.expression_block(),
+                    is_async
+                }
+            },
+            _ => {
+                unexpected_token!(self, ASTErrorKind::ExpectedBlock, self.current);
+                Expr::Null
+            }
         }
     }
 
@@ -754,6 +778,13 @@ impl AST {
 
         self.error(self.current.position, ASTErrorKind::UnclosedParen);
         params
+    }
+
+    pub fn validate_current_semicolon(&mut self) {
+        match &self.current.kind {
+            TokenKind::Semicolon => (),
+            _ => unexpected_token!(self, ASTErrorKind::ExpectedSemicolon, self.current)
+        }
     }
 
     pub fn next_token(&mut self) -> Token {

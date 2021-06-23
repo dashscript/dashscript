@@ -19,6 +19,6 @@ pub use runtime::upvalue::*;
 pub use runtime::object::*;
 pub use runtime::error::*;
 pub use runtime::iterator::ValueIter;
-pub use runtime::memory::GcHeader;
+pub use runtime::memory::{GcHeader, ValuePtr};
 pub use runtime::core;
 pub use tiny_string::TinyString;

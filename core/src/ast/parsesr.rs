@@ -3,6 +3,174 @@ use crate::{
     AST, ASTError, Expr, Stmt, StmtType, BinaryOperator, FuncParam, FunctionExpr
 };
 
+pub fn keyword_class(&mut self, index: usize) -> Stmt {
+    let name = match self.next_token().kind {
+        TokenKind::Word(name) => self.constant_pool.add_string(name),
+        _ => {
+            unexpected_token!(self, ASTErrorKind::ExpectedIdent, self.current);
+            return Stmt::default();
+        }
+    };
+
+    let extends = match self.next_token().kind {
+        TokenKind::LessThanOrEqual => {
+            match (self.next_token().kind, self.next_token().kind) {
+                (TokenKind::Word(extends), TokenKind::CurlyBraceOpen) => Some(self.constant_pool.add_string(extends)),
+                _ => {
+                    unexpected_token!(self, ASTErrorKind::ExpectedIdent, self.current);
+                    return Stmt::default();
+                }
+            }
+        },
+        TokenKind::CurlyBraceOpen => None,
+        _ => {
+            unexpected_token!(self, ASTErrorKind::ExpectedBlock, self.current);
+            return Stmt::default();
+        }
+    };
+
+    let mut token = self.lexer.next().unwrap();
+    let mut properties = Vec::new();
+    let mut static_properties = Vec::new();
+
+    loop {
+        // There might be a chance which can cause many errors
+        // due to the original first one. This is used to prevent
+        // the overflow of duplicate chained errors.
+        if self.had_error {
+            return Stmt::default();
+        }
+
+        match token.kind {
+            TokenKind::CurlyBraceClose => return Stmt {
+                expr: Expr::Class { name, extends, properties, static_properties },
+                index
+            },
+            TokenKind::Keyword(Keyword::Const) => {
+                let name = match (self.next_token().kind, self.next_token().kind) {
+                    (TokenKind::Word(name), TokenKind::Assign) => self.constant_pool.add_string(name),
+                    _ => {
+                        unexpected_token!(self, ASTErrorKind::ExpectedIdent, self.current);
+                        return Stmt::default();
+                    }
+                };
+
+                properties.push((name, self.expression(ASTErrorKind::UnexpectedExpr), true));
+                self.validate_current_semicolon();
+            },
+            TokenKind::Keyword(Keyword::Let) => {
+                let name = match (self.next_token().kind, self.next_token().kind) {
+                    (TokenKind::Word(name), TokenKind::Assign) => self.constant_pool.add_string(name),
+                    _ => {
+                        unexpected_token!(self, ASTErrorKind::ExpectedIdent, self.current);
+                        return Stmt::default();
+                    }
+                };
+
+                properties.push((name, self.expression(ASTErrorKind::UnexpectedExpr), false));
+                println!("{:?}", properties);
+                self.validate_current_semicolon();
+            },
+            TokenKind::Keyword(Keyword::Func) => {
+                let (name, parameters) = match self.next_token().kind {
+                    TokenKind::Word(name) => {
+                        match self.next_token().kind {
+                            TokenKind::ParenOpen => (self.constant_pool.add_string(name), self.expression_function_params()),
+                            _ => {
+                                unexpected_token!(self, ASTErrorKind::ExpectedIdent, self.current);
+                                return Stmt::default();
+                            }
+                        }
+                    },
+                    _ => {
+                        unexpected_token!(self, ASTErrorKind::ExpectedIdent, self.current);
+                        return Stmt::default();
+                    }
+                };
+
+                properties.push((name, Expr::Function {
+                    name: constant_pool::ANONYMOUS_CONSTANT,
+                    parameters,
+                    is_async: false,
+                    inner: self.expression_block()
+                }, true));
+            },
+            TokenKind::Keyword(Keyword::Static) => {
+                match self.next_token().kind {
+                    TokenKind::Keyword(Keyword::Const) => {
+                        let name = match (self.next_token().kind, self.next_token().kind) {
+                            (TokenKind::Word(name), TokenKind::Assign) => self.constant_pool.add_string(name),
+                            _ => {
+                                unexpected_token!(self, ASTErrorKind::ExpectedIdent, self.current);
+                                return Stmt::default();
+                            }
+                        };
+    
+                        static_properties.push((name, self.expression(ASTErrorKind::UnexpectedExpr), true));
+                        self.validate_current_semicolon();
+                    },
+                    TokenKind::Keyword(Keyword::Let) => {
+                        let name = match (self.next_token().kind, self.next_token().kind) {
+                            (TokenKind::Word(name), TokenKind::Assign) => self.constant_pool.add_string(name),
+                            _ => {
+                                unexpected_token!(self, ASTErrorKind::ExpectedIdent, self.current);
+                                return Stmt::default();
+                            }
+                        };
+    
+                        static_properties.push((name, self.expression(ASTErrorKind::UnexpectedExpr), false));
+                        self.validate_current_semicolon();
+                    },
+                    TokenKind::Keyword(Keyword::Func) => {
+                        let (name, parameters) = match self.next_token().kind {
+                            TokenKind::Word(name) => {
+                                match self.next_token().kind {
+                                    TokenKind::ParenOpen => (self.constant_pool.add_string(name), self.expression_function_params()),
+                                    _ => {
+                                        unexpected_token!(self, ASTErrorKind::ExpectedIdent, self.current);
+                                        return Stmt::default();
+                                    }
+                                }
+                            },
+                            _ => {
+                                unexpected_token!(self, ASTErrorKind::ExpectedIdent, self.current);
+                                return Stmt::default();
+                            }
+                        };
+    
+                        static_properties.push((name, Expr::Function {
+                            name: constant_pool::ANONYMOUS_CONSTANT,
+                            parameters,
+                            is_async: false,
+                            inner: self.expression_block()
+                        }, true));
+                    },
+                    _ => {
+                        unexpected_token!(self, ASTErrorKind::UnexpectedExpr, self.current);
+                        return Stmt::default();
+                    }
+                }
+            },
+            TokenKind::Error(error) => self.error(token.position, ASTErrorKind::LexerError(error)),
+            _ => {
+                unexpected_token!(self, ASTErrorKind::UnexpectedExpr, self.current);
+                return Stmt::default();
+            }
+        }
+
+        match self.lexer.next() {
+            Some(next_token) => {
+                token = next_token;
+                self.current = token.clone();
+            },
+            None => break
+        }
+    }
+
+    self.error(self.current.position, ASTErrorKind::UnexpectedEof);
+    Stmt::default()
+}
+
 match token.kind {
     TokenType::Word(name) if is_null => {
         self.ci += 1;

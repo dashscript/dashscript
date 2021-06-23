@@ -1,6 +1,7 @@
 extern crate alloc;
 
 use alloc::alloc::Layout;
+use std::marker::PhantomData;
 use std::{ptr, mem};
 use crate::{Value, Map, ValueIter, TinyString};
 use super::object::{self, ObjectKind};
@@ -59,17 +60,17 @@ impl GcHeader {
     pub const SIZE: usize = mem::size_of::<Self>();
     pub const ALIGN: usize = mem::size_of::<Self>();
     
-    pub unsafe fn unwrap<T: Clone>(pointer: *const u8) -> T {
+    pub unsafe fn unwrap_<T: Clone>(pointer: *const u8) -> T {
         let pointer = pointer.add(next_alignment(GcHeader::SIZE, mem::align_of::<T>()));
         (*(pointer as *const T)).clone()
     }
 
-    pub unsafe fn unwrap_ref<'a, T>(pointer: *const u8) -> &'a T {
+    pub unsafe fn unwrap_ref_<'a, T>(pointer: *const u8) -> &'a T {
         let pointer = pointer.add(next_alignment(GcHeader::SIZE, mem::align_of::<T>()));
         & *(pointer as *const T)
     }
 
-    pub unsafe fn unwrap_mut<'a, T>(pointer: *const u8) -> &'a mut T {
+    pub unsafe fn unwrap_mut_<'a, T>(pointer: *const u8) -> &'a mut T {
         let pointer = pointer.add(next_alignment(GcHeader::SIZE, mem::align_of::<T>()));
         &mut *(pointer as *mut T)
     }
@@ -160,22 +161,75 @@ impl GcHandle {
 
 }
 
-pub fn unwrap_str_bytes(ptr: *const u8) -> &'static [u8] {
-    unsafe { GcHeader::unwrap_ref::<TinyString>(ptr).as_bytes() }
+#[derive(Debug, Hash)]
+pub struct ValuePtr<T>(pub(crate) *const u8, PhantomData<T>);
+
+impl<T> ValuePtr<T> {
+
+    pub fn new(ptr: *const u8) -> Self {
+        if ptr.is_null() {
+            panic!("Pointer {:?} provided for [`ValuePtr::new`] failed.", ptr);
+        }
+
+        Self(ptr, PhantomData)
+    }
+
+    pub(crate) fn new_unchecked(ptr: *const u8) -> Self {
+        Self(ptr, PhantomData)
+    }
+
+    pub fn as_ptr(&self) -> *const u8 {
+        self.0
+    }
+
+    pub fn as_mut_ptr(&self) -> *mut u8 {
+        self.0 as *mut u8
+    }
+
+    pub fn unwrap(&self) -> T
+    where
+        T: Clone
+    {
+        unsafe {
+            let pointer = self.0.add(next_alignment(GcHeader::SIZE, mem::align_of::<T>()));
+            (*(pointer as *const T)).clone()
+        }
+    }
+
+    pub fn unwrap_ref<'a>(&self) -> &'a T {
+        unsafe {
+            let pointer = self.0.add(next_alignment(GcHeader::SIZE, mem::align_of::<T>()));
+            & *(pointer as *const T)
+        }
+    }
+
+    pub fn unwrap_mut<'a>(&self) -> &'a mut T {
+        unsafe {
+            let pointer = self.0.add(next_alignment(GcHeader::SIZE, mem::align_of::<T>()));
+            &mut *(pointer as *mut T)
+        }
+    }
+
 }
 
-pub fn unwrap_str<'a>(ptr: *const u8) -> &'a str {
-    unsafe { &*GcHeader::unwrap_ref::<TinyString>(ptr) }
+impl ValuePtr<TinyString> {
+    pub fn unwrap_bytes(&self) -> &[u8] {
+        self.unwrap_ref().as_bytes()
+    }
 }
 
-pub fn unwrap_tiny_string_ref<'a>(ptr: *const u8) -> &'a TinyString {
-    unsafe { GcHeader::unwrap_ref::<TinyString>(ptr) }
+impl<T> Clone for ValuePtr<T> {
+    fn clone(&self) -> Self {
+        Self(self.0, PhantomData)
+    }
 }
 
-pub fn unwrap_tiny_string(ptr: *const u8) -> TinyString {
-    unsafe { GcHeader::unwrap::<TinyString>(ptr) }
+impl<T> Copy for ValuePtr<T> {}
+
+impl<T> PartialEq for ValuePtr<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
 }
 
-pub fn unwrap_array(ptr: *const u8) -> Vec<Value> {
-    unsafe { GcHeader::unwrap::<Vec<Value>>(ptr) }
-}
+impl<T> Eq for ValuePtr<T> {}

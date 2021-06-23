@@ -13,3 +13,5 @@ stress_gc = []
 [dependencies]
 serde_json = "1.0.64"
 serde = "1.0.125"
+futures = { version = "0.3.*"}
+# tokio = { version = "0.2.*", features = ["blocking"] }

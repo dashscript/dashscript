@@ -52,8 +52,6 @@ pub enum Keyword {
     For,
     In,
     Continue,
-    Class,
-    Static,
     Import,
     As,
     Try,

@@ -1,5 +1,6 @@
 use super::opcode::*;
 use crate::{CompilerError, CompilerErrorKind, Position, ASTBuild, Expr, BinOp, AssignOp};
+use crate::ast::constant_pool;
 
 pub type OptionalValue<T> = Option<(T, u8)>;
 
@@ -83,7 +84,7 @@ pub struct BytecodeCompiler {
     pub(crate) try_blocks: Vec<(usize, usize, u8)>,
     loop_handler: LoopHandler,
     current_statement_index: usize,
-    in_instance_depth: bool
+    instance_depth: Option<u16>
 }
 
 impl BytecodeCompiler {
@@ -450,8 +451,8 @@ impl BytecodeCompiler {
             },
             Expr::Dict(dict) => {
                 let len = dict.len() as u32;
-                let enclosing = self.in_instance_depth;
-                self.in_instance_depth = true;
+                let enclosing = self.instance_depth;
+                self.instance_depth = Some(self.depth);
 
                 for (constant_id, expr) in dict {
                     self.load_constant(constant_id, STRING, STRING_LONG);
@@ -460,11 +461,15 @@ impl BytecodeCompiler {
                 
                 self.bytes.push(DICT);
                 self.load_constant_without_op(len);
-                self.in_instance_depth = enclosing;
+                self.instance_depth = enclosing;
             },
             Expr::Function { name, parameters, inner, is_async } => {
                 let flags = FunctionFlags {
-                    instance_function: if name == 2 { false } else { self.in_instance_depth },
+                    instance_function: if name == 2 { false } else { 
+                        if let Some(depth) = self.instance_depth {
+                            self.depth == depth
+                        } else { false }
+                    },
                     async_function: is_async
                 };
 
@@ -472,7 +477,7 @@ impl BytecodeCompiler {
                 let offset_ip = self.bytes.len();
 
                 // Basically safe because the pointer it is reading is valid one
-                let enclosing = unsafe { std::ptr::read(&mut self.loop_handler) };
+                let enclosing_loop = unsafe { std::ptr::read(&mut self.loop_handler) };
                 self.loop_handler = LoopHandler { ip: self.bytes.len() - 1, break_offset_holders: Vec::new() };
 
                 self.depth += 1;
@@ -492,19 +497,18 @@ impl BytecodeCompiler {
                     });
                 }
 
-                let (to_pop, slot) = if name != 0 {
-                    (false, self.declare(name, true, self.current_statement_index))
-                } else { 
-                    (true, 0) 
-                };
-
                 self.closures.push(closure);
                 for statement in inner {
                     load_statement!(statement);
                 }
 
+                // Just incase if there is no return statement at the end of the
+                // function it can mess up the vm.
+                if *self.bytes.last().unwrap() != RETURN {
+                    self.bytes.extend_from_slice(&[NULL, RETURN]);
+                }
+            
                 self.depth -= 1;
-                self.bytes.push(RETURN);
                 self.update_offset(offset_ip);
 
                 let closure = self.closures.pop().unwrap();
@@ -515,14 +519,14 @@ impl BytecodeCompiler {
 
                 self.load_constant_without_op(name);
                 self.end_loop();
-                self.loop_handler = enclosing;
+                self.loop_handler = enclosing_loop;
 
-                if !to_pop {
+                if name != constant_pool::ANONYMOUS_CONSTANT {
+                    let slot = self.declare(name, true, self.current_statement_index);
                     self.bytes.extend_from_slice(&[SET_LOCAL, slot]);
                 }
 
-                // If this passes as true then this function is not an anonymous function
-                return to_pop;
+                return false;
             },
             Expr::Group(group) => { 
                 self.load_expr(*group); 
@@ -581,7 +585,7 @@ impl BytecodeCompiler {
             if local.depth <= self.depth { 
                 return;
             }
-
+            
             self.bytes.push(if local.is_upvalue { CLOSE_UPVALUE } else { POP });
             closure.locals.pop();
         }

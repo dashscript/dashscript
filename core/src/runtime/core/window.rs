@@ -1,14 +1,15 @@
 use std::{env, thread, process};
+use std::fs::{self, File};
 use std::time::Duration;
-use std::ptr::NonNull;
-use crate::{Value, Vm, Map, TinyString};
-use crate::runtime::memory::{unwrap_str};
+use crate::{Value, Vm, Map, TinyString, RuntimeError};
 use super::map_builder::MapBuilder;
 
 pub fn init(vm: &mut Vm) -> Value {
     let env = init_env(vm);
     let permissions = init_permissions(vm);
     let mut window = MapBuilder::new(vm);
+
+    init_fs(&mut window);
 
     window.string_constant("version", "1.0.0-dev");
     window.string_constant("platform", env::consts::OS);
@@ -34,31 +35,14 @@ pub fn init(vm: &mut Vm) -> Value {
         Ok(Value::Null)
     });
 
-    window.native_fn("cwd", |vm, _| {
-        let cwd = match vm.path.parent() {
-            Some(path) => {
-                match path.to_str() {
-                    Some(path) => TinyString::new(path.as_bytes()),
-                    None => return Ok(Value::Null)
-                }
-            },
-            None => TinyString::new(&[])
-        };
-
-        Ok(Value::String(vm.allocate_str(cwd)))
+    window.native_fn("inspect", |vm, args| {
+        match args.get(0) {
+            Some(value) => Ok(Value::String(vm.allocate_string(format!("{}", value)))),
+            None => Err(RuntimeError::new_str(vm, "Expected (any) parameters."))
+        }
     });
 
-    window.native_fn("filename", |vm, _| Ok(
-        match vm.path.to_str() {
-            Some(path) => {
-                let filename = TinyString::new(path.as_bytes());
-                Value::String(vm.allocate_str(filename))
-            },
-            None => return Ok(Value::Null)
-        }
-    ));
-
-    Value::Dict(unsafe { NonNull::new_unchecked(window.allocate()) })
+    Value::Dict(window.allocate_value_ptr())
 }
 
 pub fn init_env(vm: &mut Vm) -> Value {
@@ -67,7 +51,7 @@ pub fn init_env(vm: &mut Vm) -> Value {
     env.native_fn("get", |vm, args| Ok(
         match args.get(0) {
             Some(Value::String(bytes)) => {
-                match env::var(unwrap_str(bytes.as_ptr())) {
+                match env::var(bytes.unwrap_ref() as &str) {
                     Ok(var) => Value::String(vm.allocate_str_bytes(var.as_bytes())),
                     Err(_) => Value::Null
                 }
@@ -78,8 +62,8 @@ pub fn init_env(vm: &mut Vm) -> Value {
 
     env.native_fn("set", |_, args| Ok(Value::Bool(
         match args.get(0..2) {
-            Some(&[Value::String(key_ptr), Value::String(value_ptr)]) => {
-                env::set_var(unwrap_str(key_ptr.as_ptr()), unwrap_str(value_ptr.as_ptr()));
+            Some(&[Value::String(key), Value::String(value)]) => {
+                env::set_var(key.unwrap_ref() as &str, value.unwrap_ref() as &str);
                 true
             },
             _ => false
@@ -89,7 +73,7 @@ pub fn init_env(vm: &mut Vm) -> Value {
     env.native_fn("delete", |_, args| Ok(Value::Bool(
         match args.get(0) {
             Some(Value::String(ptr)) => {
-                env::remove_var(unwrap_str(ptr.as_ptr()));
+                env::remove_var(ptr.unwrap_ref() as &str);
                 true
             },
             _ => false
@@ -103,10 +87,10 @@ pub fn init_env(vm: &mut Vm) -> Value {
             map.insert(Value::String(vm.allocate_string(key)), (Value::String(vm.allocate_string(value)), true));
         }
 
-        Ok(Value::Dict(unsafe { NonNull::new_unchecked(vm.allocate(map)) }))
+        Ok(Value::Dict(vm.allocate_value_ptr(map)))
     });
 
-    Value::Dict(unsafe { NonNull::new_unchecked(env.allocate()) })
+    Value::Dict(env.allocate_value_ptr())
 }
 
 pub fn init_permissions(vm: &mut Vm) -> Value {
@@ -119,5 +103,87 @@ pub fn init_permissions(vm: &mut Vm) -> Value {
     permissions.constant("childProcess", Value::Bool(vm_permissions.child_process));
     permissions.constant("unsafe", Value::Bool(vm_permissions.unsafe_libs));
 
-    Value::Dict(unsafe { NonNull::new_unchecked(permissions.allocate()) })
+    Value::Dict(permissions.allocate_value_ptr())
+}
+
+pub fn init_fs<'a>(window: &mut MapBuilder<'a>) {
+    if window.vm.permissions.read {
+        window.native_fn("cwd", |vm, _| {
+            let cwd = match vm.path.parent() {
+                Some(path) => {
+                    match path.to_str() {
+                        Some(path) => TinyString::new(path.as_bytes()),
+                        None => TinyString::new(&[])
+                    }
+                },
+                None => TinyString::new(&[])
+            };
+    
+            Ok(Value::String(vm.allocate_value_ptr(cwd)))
+        });
+
+        window.native_fn("execPath", |vm, _| {
+            let exec_path = match env::current_dir() {
+                Ok(path) => {
+                    match path.to_str() {
+                        Some(path) => TinyString::new(path.as_bytes()),
+                        None => TinyString::new(&[])
+                    }
+                },
+                Err(error) => return Err(RuntimeError::new_io(vm, error))
+            };
+    
+            Ok(Value::String(vm.allocate_value_ptr(exec_path)))
+        });
+
+        window.native_fn("readTextFile", |vm, args| {
+            match args.get(0) {
+                Some(Value::String(file_path)) => {
+                    match fs::read_to_string(file_path.unwrap_ref() as &str) {
+                        Ok(string) => Ok(Value::String(vm.allocate_string(string))),
+                        Err(error) => Err(RuntimeError::new_io(vm, error))
+                    }
+                },
+                _ => Err(RuntimeError::new_str(vm, "Expected (string) parameters."))
+            }
+        });
+    }
+
+    if window.vm.permissions.write {
+        window.native_fn("chdir", |vm, args| {
+            match args.get(0) {
+                Some(Value::String(new_dir)) => {
+                    match env::set_current_dir(new_dir.unwrap_ref() as &str) {
+                        Ok(_) => Ok(Value::Null),
+                        Err(error) => Err(RuntimeError::new_io(vm, error))
+                    }
+                },
+                _ => Err(RuntimeError::new_str(vm, "Expected (string) parameters."))
+            }
+        });
+
+        window.native_fn("copyFile", |vm, args| {
+            match args.get(0..2) {
+                Some([Value::String(from), Value::String(to)]) => {
+                    match std::fs::copy(from.unwrap_ref() as &str, to.unwrap_ref() as &str) {
+                        Ok(_) => Ok(Value::Null),
+                        Err(error) => Err(RuntimeError::new_io(vm, error))
+                    }
+                },
+                _ => Err(RuntimeError::new_str(vm, "Expected (string, string) parameters."))
+            }
+        });
+
+        window.native_fn("createFile", |vm, args| {
+            match args.get(0) {
+                Some(Value::String(file_path)) => {
+                    match File::create(file_path.unwrap_ref() as &str) {
+                        Ok(_) => Ok(Value::Null),
+                        Err(error) => Err(RuntimeError::new_io(vm, error))
+                    }
+                },
+                _ => Err(RuntimeError::new_str(vm, "Expected (string) parameters."))
+            }
+        });
+    }
 }

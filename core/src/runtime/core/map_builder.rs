@@ -1,5 +1,4 @@
-use std::ptr::NonNull;
-use crate::{Vm, Value, Map, NativeFunction, NativeFunctionHandler, TinyString};
+use crate::{Vm, Value, Map, NativeFunction, NativeFunctionHandler, TinyString, ValuePtr};
 
 pub struct MapBuilder<'a> {
     pub(super) map: Map,
@@ -21,24 +20,18 @@ impl MapBuilder<'_> {
             is_instance: false
         };
 
-        let ptr = unsafe { NonNull::new_unchecked(self.vm.allocate(nf)) };
+        let ptr = self.vm.allocate_value_ptr(nf);
         self.map.insert(Value::String(name), (Value::NativeFn(ptr), true));
     }
 
     pub fn constant(&mut self, name: &str, value: Value) {
-        let allocated = self.vm.allocate_str_bytes(name.as_bytes());
+        let allocated = self.vm.allocate_static_str(name);
         self.map.insert(Value::String(allocated), (value, true));
     }
 
     pub fn string_constant(&mut self, name: &str, value: &str) {
-        let allocated = self.vm.allocate_str_bytes(name.as_bytes());
+        let allocated = self.vm.allocate_static_str(name);
         let allocated_constant = self.vm.allocate_str_bytes(value.as_bytes());
-        self.map.insert(Value::String(allocated), (Value::String(allocated_constant), true));
-    }
-
-    pub fn char_constant(&mut self, name: &str, value: char) {
-        let allocated = self.vm.allocate_str_bytes(name.as_bytes());
-        let allocated_constant = self.vm.allocate_str_bytes(&[value as u8]);
         self.map.insert(Value::String(allocated), (Value::String(allocated_constant), true));
     }
 
@@ -46,8 +39,8 @@ impl MapBuilder<'_> {
         self.vm.allocate(self.map)
     }
 
-    pub fn allocate_non_null(self) -> NonNull<u8> {
-        unsafe { NonNull::new_unchecked(self.vm.allocate(self.map)) }
+    pub fn allocate_value_ptr(self) -> ValuePtr<Map> {
+        self.vm.allocate_value_ptr(self.map)
     }
 
 }

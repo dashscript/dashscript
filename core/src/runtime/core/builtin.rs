@@ -1,4 +1,3 @@
-use std::ptr::NonNull;
 use std::time::{SystemTime, UNIX_EPOCH};
 use crate::{Vm, Value, TinyString};
 use super::map_builder::MapBuilder;
@@ -148,7 +147,7 @@ pub fn init_math(vm: &mut Vm) -> Value {
     math.native_fn("randomUint", |_, _| Ok(Value::Int(random_usize() as isize)));
     math.native_fn("randomInt", |_, _| Ok(Value::Int(random_isize())));
 
-    Value::Dict(unsafe { NonNull::new_unchecked(math.allocate()) })
+    Value::Dict(math.allocate_value_ptr())
 }
 
 pub fn init_date(vm: &mut Vm) -> Value {
@@ -161,7 +160,7 @@ pub fn init_date(vm: &mut Vm) -> Value {
             .as_millis() as isize
     )));
 
-    Value::Dict(unsafe { NonNull::new_unchecked(date.allocate()) })
+    Value::Dict(date.allocate_value_ptr())
 }
 
 pub fn init_memory(vm: &mut Vm) -> Value {
@@ -182,23 +181,24 @@ pub fn init_memory(vm: &mut Vm) -> Value {
         Ok(Value::Bool(true))
     });
 
-    Value::Dict(unsafe { NonNull::new_unchecked(memory.allocate()) })
+    Value::Dict(memory.allocate_value_ptr())
 }
 
 pub fn init_json(vm: &mut Vm) -> Value {
     let mut json = MapBuilder::new(vm);
 
     json.native_fn("stringify", |vm, args| {
-        let string = vm.allocate_str(TinyString::new(args.get(0).unwrap_or_default().json_stringify().as_bytes()));
+        let string = vm.allocate_value_ptr(
+            TinyString::new(
+                args.get(0)
+                    .unwrap_or_default()
+                    .json_stringify()
+                    .as_bytes()
+            )
+        );
+
         Ok(Value::String(string))
     });
 
-    Value::Dict(unsafe { NonNull::new_unchecked(json.allocate()) })
-}
-
-pub fn init_child_process(vm: &mut Vm) -> Value {
-    let child_process = MapBuilder::new(vm);
-
-
-    Value::Dict(unsafe { NonNull::new_unchecked(child_process.allocate()) })
+    Value::Dict(json.allocate_value_ptr())
 }

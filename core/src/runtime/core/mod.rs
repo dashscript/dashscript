@@ -1,33 +1,14 @@
-use std::ptr::NonNull;
-use std::ops::Deref;
 use std::io;
-use crate::{Vm, Value, TinyString, NativeFunction, RuntimeError, ValueIter, GcHeader};
+use crate::{Vm, Value, TinyString, NativeFunction, RuntimeError, ValueIter};
 
-pub mod modules;
 pub mod builtin;
 pub mod map_builder;
 pub mod json;
 pub mod window;
+pub mod base64;
 pub mod methods;
 
-// Easy way to create objects instead of deep syntaxes
-#[macro_export]
-macro_rules! dict {
-    ($vm:expr, {$($key:tt: $val:expr,)+}) => {{
-        let mut map = std::collections::HashMap::new();
-        $(map.insert(DictKey::Str($key.to_string()), (Value::from($val), false));)*
-    }};
-
-    ($vm:expr, extendable {$($key:tt: $val:expr,)+}) => {{
-        let mut map = std::collections::HashMap::new();
-        $(map.insert(DictKey::Str($key.to_string()), (Value::from($val), false));)*
-        map
-    }};
-
-    (extend $map:expr => {$($key:tt: $val:expr,)+}) => {{
-        $($map.insert(DictKey::Str($key.to_string()), (Value::from($val), false));)*
-    }};
-}
+use base64::DecoderError;
 
 pub fn init(vm: &mut Vm) {
 
@@ -46,11 +27,6 @@ pub fn init(vm: &mut Vm) {
     if vm.permissions.memory {
         let memory = builtin::init_memory(vm);
         vm.add_global("Memory", memory);
-    }
-
-    if vm.permissions.child_process {
-        let child_process = builtin::init_child_process(vm);
-        vm.add_global("ChildProcess", child_process);
     }
 
     let window = window::init(vm);
@@ -73,7 +49,7 @@ pub fn init(vm: &mut Vm) {
                 is_instance: false
             };
 
-            let ptr = unsafe { NonNull::new_unchecked(vm.allocate(nf)) };
+            let ptr = vm.allocate_value_ptr(nf);
             vm.globals.insert(constant_id, (Value::NativeFn(ptr), false));
         }};
     }
@@ -95,7 +71,7 @@ pub fn init(vm: &mut Vm) {
     });
 
     native_fn!(b"typeof", |vm, args| {
-        let type_ = vm.allocate_str(args.get(0).unwrap_or_default().get_type());
+        let type_ = vm.allocate_value_ptr(args.get(0).unwrap_or_default().get_type());
         Ok(Value::String(type_))
     });
 
@@ -141,7 +117,7 @@ pub fn init(vm: &mut Vm) {
     )));
 
     native_fn!(b"range", |vm, args| {
-        let (start, end) = match args.as_slice() {
+        let (start, end) = match args {
             [value] => (0, value.to_isize()),
             [start, end] => (start.to_isize(), end.to_isize()),
             _ => (0, 0)
@@ -152,16 +128,47 @@ pub fn init(vm: &mut Vm) {
             vec.push(Value::Int(i));
         }
 
-        let ptr = vm.allocate(ValueIter::new(vec.as_slice()));
-        Ok(Value::Iterator(unsafe { NonNull::new_unchecked(ptr) }))
+        Ok(Value::Iterator(vm.allocate_value_ptr(ValueIter::new(vec.as_slice()))))
     });
+
+    native_fn!(b"btoa", |vm, args| Ok(
+        match args.get(0) {
+            Some(Value::String(ptr)) => Value::String(
+                match base64::encode(ptr.unwrap_bytes()) {
+                    Some(str_) => vm.allocate_value_ptr(str_),
+                    None => vm.allocate_static_str("")
+                }
+            ),
+            _ => Value::Null
+        }
+    ));
+
+    native_fn!(b"atob", |vm, args| Ok(
+        match args.get(0) {
+            Some(Value::String(ptr)) => {
+                match base64::decode(ptr.unwrap_bytes()) {
+                    Ok(str_) => Value::String(vm.allocate_value_ptr(str_)),
+                    Err(error) => {
+                        return Err(RuntimeError::from(Value::String(vm.allocate_string(
+                            match error {
+                                DecoderError::InvalidLength => format!("The base64 string has invalid length."),
+                                DecoderError::InvalidByte(index, byte) => format!("Invalid byte {} at index {}.", byte, index),
+                                DecoderError::InvalidLastSymbol(index, byte) => format!("Invalid last symbol {} at index {}.", index, byte)
+                            }
+                        ))));
+                    }
+                }
+            },
+            _ => Value::Null
+        }
+    ));
 
 }
 
 impl Value {
     pub(super) fn unwrap_string(&self) -> &str {
         match self {
-            Self::String(bytes) => unsafe { &GcHeader::unwrap_ref::<TinyString>(bytes.as_ptr()).deref() },
+            Self::String(bytes) => bytes.unwrap_ref(),
             _ => "null"
         }
     }

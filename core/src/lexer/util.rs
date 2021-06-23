@@ -46,8 +46,6 @@ impl Lexer {
             "await" => TokenKind::Keyword(Keyword::Await),
             "for" => TokenKind::Keyword(Keyword::For),
             "in" => TokenKind::Keyword(Keyword::In),
-            "class" => TokenKind::Keyword(Keyword::Class),
-            "static" => TokenKind::Keyword(Keyword::Static),
             "try" => TokenKind::Keyword(Keyword::Try),
             "expect" => TokenKind::Keyword(Keyword::Expect),
             "import" => TokenKind::Keyword(Keyword::Import),

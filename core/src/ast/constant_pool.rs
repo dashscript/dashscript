@@ -1,5 +1,9 @@
 use crate::TinyString;
 
+pub const ANONYMOUS_CONSTANT: u32 = 0;
+pub const ERROR_CONSTANT: u32 = 1;
+pub const PROTOTYPE_CONSTANT: u32 = 3;
+
 #[derive(Debug, Clone)]
 pub struct ConstantPool {
     pub strings: Vec<TinyString>,
@@ -10,7 +14,12 @@ pub struct ConstantPool {
 impl Default for ConstantPool {
     fn default() -> Self {
         Self {
-            strings: vec![TinyString::new(b"anonymous"), TinyString::new(b"error"), TinyString::new(b"init")],
+            strings: vec![
+                TinyString::new(b"anonymous"), 
+                TinyString::new(b"error"), 
+                TinyString::new(b"init"),
+                TinyString::new(b"prototype")
+            ],
             ints: Vec::new(),
             floats: Vec::new()
         }

@@ -1,5 +1,4 @@
-use crate::{Value, GcHeader, Map};
-use crate::runtime::memory::{unwrap_str};
+use crate::Value;
 
 impl Value {
 
@@ -7,13 +6,13 @@ impl Value {
         match self {
             Value::Int(int) => int.to_string(),
             Value::Float(float) => float.to_string(),
-            Value::String(string) => format!("\"{}\"", unwrap_str(string.as_ptr())),
+            Value::String(string) => format!("\"{}\"", string.unwrap_ref()),
             Value::Bool(boolean) => boolean.to_string(),
             Value::Null => "null".to_string(),
             Value::Array(array) => {
                 let mut string = String::from('[');
 
-                for item in unsafe { GcHeader::unwrap_ref::<Vec<Value>>(array.as_ptr()) } {
+                for item in array.unwrap_ref() {
                     string.push_str(item.json_stringify().as_str());
                     string.push(',');
                 }
@@ -25,7 +24,7 @@ impl Value {
             Value::Dict(map) => {
                 let mut string = String::from('{');
                 
-                for (key, value) in unsafe { GcHeader::unwrap_ref::<Map>(map.as_ptr()) } {
+                for (key, value) in map.unwrap_ref() {
                     string.push_str(key.json_stringify().as_str());
                     string.push(':');
                     string.push_str(value.0.json_stringify().as_str());

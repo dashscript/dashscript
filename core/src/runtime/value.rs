@@ -2,24 +2,22 @@
 // instead of just an enum which has the size of 16 bytes.
 use std::ops;
 use std::hash::{Hash, Hasher};
-use std::ptr::NonNull;
 use std::string::ToString;
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
-use crate::{TinyString, GcHeader, Map, ValueIter, Vm};
-use super::memory::{unwrap_str_bytes, unwrap_str, unwrap_tiny_string};
+use crate::{TinyString, Map, ValueIter, Vm, ValuePtr, Function, NativeFunction};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
     Bool(bool), // The basic boolean value
     Int(isize), // The basic int value
     Float(f64), // The basic float value
-    String(NonNull<u8>),
-    Array(NonNull<u8>),
-    Dict(NonNull<u8>),
-    Function(NonNull<u8>),
-    NativeFn(NonNull<u8>),
-    Iterator(NonNull<u8>),
+    String(ValuePtr<TinyString>),
+    Array(ValuePtr<Vec<Value>>),
+    Dict(ValuePtr<Map>),
+    Function(ValuePtr<Function>),
+    NativeFn(ValuePtr<NativeFunction>),
+    Iterator(ValuePtr<ValueIter>),
     Null // The basic null or empty value
 }
 
@@ -31,7 +29,7 @@ impl Value {
     pub fn to_bool(&self) -> bool {
         match self {
             Self::Bool(boolean) => *boolean,
-            Self::Int(0) => false,
+            Self::Int(0) | Self::Null => false,
             Self::Float(float) => *float == 0.0,
             _ => true
         }
@@ -46,7 +44,7 @@ impl Value {
             },
             Self::Int(int) => TinyString::new(format!("{}", int).as_bytes()),
             Self::Float(float) => TinyString::new(format!("{}", float).as_bytes()),
-            Self::String(ptr) => unwrap_tiny_string(ptr.as_ptr()),
+            Self::String(ptr) => ptr.unwrap(),
             Self::Dict(_) => TinyString::new(b"[Object]"),
             Self::Array(_) => TinyString::new(b"[Array]"),
             Self::Function(_) | Self::NativeFn(_) => TinyString::new(b"[Function]"),
@@ -78,7 +76,7 @@ impl Value {
             Self::Bool(boolean) => boolean.to_string(),
             Self::Int(int) => int.to_string(),
             Self::Float(float) => float.to_string(),
-            Self::String(bytes) => format!("\"{}\"", unwrap_str(bytes.as_ptr())),
+            Self::String(bytes) => format!("\"{}\"", bytes.unwrap_ref()),
             Self::Dict(_) => "[Object]".to_owned(),
             Self::Array(_) => "[Array]".to_owned(),
             Self::Function(_) | Self::NativeFn(_) => "[Function]".to_owned(),
@@ -144,15 +142,15 @@ impl Value {
 
     pub fn into_iter(&self) -> ValueIter {
         match self {
-            Self::Iterator(ptr) => unsafe { GcHeader::unwrap::<ValueIter>(ptr.as_ptr()) },
-            Self::Array(ptr) => ValueIter::new(unsafe { GcHeader::unwrap::<Vec<Value>>(ptr.as_ptr()).as_slice() }),
+            Self::Iterator(ptr) => ptr.unwrap(),
+            Self::Array(ptr) => ValueIter::new(ptr.unwrap_ref()),
             _ => ValueIter::default()
         }
     }
 
     pub fn iter_next(&self) -> Option<Value> {
         match self {
-            Self::Iterator(ptr) => unsafe { GcHeader::unwrap_mut::<ValueIter>(ptr.as_ptr()).next() },
+            Self::Iterator(ptr) => ptr.unwrap_mut().next(),
             _ => None
         }
     }
@@ -164,7 +162,7 @@ impl Value {
             (Self::Int(a), Self::Float(b)) => Self::Float(a as f64 + b),
             (Self::Float(a), Self::Int(b)) => Self::Float(a + b as f64),
             (Self::Null, value) => value,
-            (lhs, rhs) => Self::String(vm.allocate_str(lhs.to_tiny_string() + rhs.to_tiny_string()))
+            (lhs, rhs) => Self::String(vm.allocate_value_ptr(lhs.to_tiny_string() + rhs.to_tiny_string()))
         }
     }
 
@@ -319,6 +317,13 @@ impl ops::Rem for Value {
 
 impl Hash for Value {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        macro_rules! hash_ptr {
+            ($ptr:expr) => {{
+                state.write_u8(6);
+                $ptr.0.hash(state);   
+            }};
+        }
+
         match self {
             Self::Null => state.write_u8(0),
             Self::Bool(boolean) => state.write(&[1, *boolean as u8]),
@@ -332,16 +337,13 @@ impl Hash for Value {
             },
             Self::String(ptr) => {
                 state.write_u8(5);
-                unwrap_str_bytes(ptr.as_ptr()).hash(state);
+                ptr.unwrap_ref().hash(state);
             },
-            | Self::Array(ptr) 
-            | Self::Dict(ptr) 
-            | Self::Function(ptr) 
-            | Self::NativeFn(ptr)
-            | Self::Iterator(ptr) => {
-                state.write_u8(6);
-                ptr.hash(state);
-            }
+            Self::Array(ptr) => hash_ptr!(ptr),
+            Self::Dict(ptr) => hash_ptr!(ptr),
+            Self::Function(ptr) => hash_ptr!(ptr),
+            Self::NativeFn(ptr) => hash_ptr!(ptr),
+            Self::Iterator(ptr) => hash_ptr!(ptr)
         }
     }
 }
@@ -351,7 +353,7 @@ impl PartialEq for Value {
         match (self, other) {
             (Value::Float(a), Value::Float(b)) => a == b,
             (Value::Int(a), Value::Int(b)) => a == b,
-            (Value::String(a), Value::String(b)) => unwrap_str_bytes(a.as_ptr()) == unwrap_str_bytes(b.as_ptr()),
+            (Value::String(a), Value::String(b)) => a.unwrap_ref() == b.unwrap_ref(),
             (Value::Array(a), Value::Array(b)) => a == b,
             (Value::Dict(a), Value::Dict(b)) => a == b,
             (Value::Function(a), Value::Function(b)) => a == b,
@@ -394,26 +396,25 @@ impl Eq for Value {}
 impl Display for Value {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Value::String(bytes) => write!(f, "{}", unwrap_str(bytes.as_ptr())),
+            Value::String(bytes) => write!(f, "{}", bytes.unwrap_ref()),
             Value::Int(int) => write!(f, "{}", int),
             Value::Float(float) => write!(f, "{}", float),
             Value::Null => write!(f, "null"),
             Value::Bool(boolean) => write!(f, "{}", boolean),
             Value::Dict(entries) => {
                 write!(f, "{{\n")?;
-                for (key, value) in unsafe { GcHeader::unwrap::<Map>(entries.as_ptr()) } {
-                    #[allow(unused_must_use)]
-                    write!(f, "    {}: {},\n", key.to_string(), value.0.to_string());
+                for (key, value) in entries.unwrap_ref() {
+                    write!(f, "    {}: {},\n", key.to_string(), value.0.to_string()).unwrap();
                 }
 
                 write!(f, "}}")
             },
             Value::Array(vector) => {
                 write!(f, "[\n")?;
-                for item in unsafe { GcHeader::unwrap::<Vec<Value>>(vector.as_ptr()) }  {
-                    #[allow(unused_must_use)]
-                    write!(f, "    {},\n", item.to_string());
+                for item in vector.unwrap_ref()  {
+                    write!(f, "    {},\n", item.to_string()).unwrap();
                 }
+                
                 write!(f, "]")
             },
             Value::Function(_) | Value::NativeFn(_) => write!(f, "[Function]"),

@@ -75,6 +75,7 @@ write_main_opcodes!(
     ARRAY = 35
     DICT = 36
     FUNC = 37
+    CLASS = 82
 
     // --
     RETURN = 38
