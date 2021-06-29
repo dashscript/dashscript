@@ -162,13 +162,7 @@ impl Lexer {
                         () => {
                             Token {
                                 kind: match op {
-                                    '+' => {
-                                        if is_float {
-                                            TokenKind::Float(initial_number * 10_usize.pow(exponent_number.parse().unwrap()) as f64)
-                                        } else {
-                                            TokenKind::Int(initial_number as isize * 10_isize.pow(exponent_number.parse().unwrap()))
-                                        }
-                                    },
+                                    '+' => TokenKind::Int(initial_number as isize * 10_isize.pow(exponent_number.parse().unwrap())),
                                     // The method is here made through string formatting
                                     // because the number loses its precision
                                     '-' => {

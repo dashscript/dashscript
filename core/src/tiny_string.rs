@@ -196,6 +196,12 @@ impl From<&str> for TinyString {
     }
 }
 
+impl From<String> for TinyString {
+    fn from(string: String) -> TinyString {
+        TinyString::new(string.as_bytes())
+    }
+}
+
 const CONT_MASK: u8 = 0b0011_1111;
 
 fn utf8_acc_cont_byte(ch: u32, byte: u8) -> u32 {

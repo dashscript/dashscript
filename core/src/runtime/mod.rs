@@ -6,3 +6,4 @@ pub mod memory;
 pub mod object;
 pub mod iterator;
 pub mod core;
+pub mod resources;

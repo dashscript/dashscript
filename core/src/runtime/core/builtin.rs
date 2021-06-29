@@ -1,6 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::{Vm, Value, TinyString};
-use super::map_builder::MapBuilder;
+use crate::{Vm, Value, TinyString, Map, RuntimeError, Instance};
+use super::map_builder::{MapBuilder, ClassBuilder};
+use super::date::{self, UNIX_EPOCH_DATE};
 
 fn random_isize() -> isize {
     let mut random: isize = SystemTime::now()
@@ -151,7 +152,92 @@ pub fn init_math(vm: &mut Vm) -> Value {
 }
 
 pub fn init_date(vm: &mut Vm) -> Value {
-    let mut date = MapBuilder::new(vm);
+    let mut date = ClassBuilder::new(vm);
+
+    fn unwrap_date(vm: &Vm, args: &[Value]) -> isize {
+        match args.get(0) {
+            Some(Value::Instance(ptr)) => {
+                match ptr.unwrap_ref().properties.get(&vm.constants.__date) {
+                    Some((Value::Int(int), _)) => *int,
+                    _ => UNIX_EPOCH_DATE
+                }
+            },
+            _ => UNIX_EPOCH_DATE
+        }
+    }
+
+    fn unwrap_time(vm: &Vm, args: &[Value]) -> isize {
+        match args.get(0) {
+            Some(Value::Instance(ptr)) => {
+                match ptr.unwrap_ref().properties.get(&vm.constants.__time) {
+                    Some((Value::Int(int), _)) => *int,
+                    _ => 0
+                }
+            },
+            _ => 0
+        }
+    }
+
+    fn unwrap_both(vm: &Vm, args: &[Value]) -> (isize, isize) {
+        match args.get(0) {
+            Some(Value::Instance(ptr)) => {
+                let instance = ptr.unwrap_ref();
+                match (instance.properties.get(&vm.constants.__date), instance.properties.get(&vm.constants.__time)) {
+                    (Some((Value::Int(date), _)), Some((Value::Int(time), _))) => (*date, *time),
+                    _ => (UNIX_EPOCH_DATE, 0)
+                }
+            },
+            _ => (UNIX_EPOCH_DATE, 0)
+        }
+    }
+
+    fn unwrap_date_entry(option: Option<&(Value, bool)>) -> isize {
+        match option {
+            Some((Value::Int(int), _)) => *int,
+            _ => UNIX_EPOCH_DATE
+        }
+    }
+
+    date.init(|vm, args| {
+        match &args {
+            [Value::Instance(ptr)] => {
+                let instance = ptr.unwrap_mut();
+                let (date, time) = date::from_system_time(SystemTime::now());
+                instance.properties.insert(vm.constants.__date, (Value::Int(date), false)); 
+                instance.properties.insert(vm.constants.__time, (Value::Int(time), false)); 
+            },
+            [Value::Instance(ptr), Value::Null] => {
+                let instance = ptr.unwrap_mut();
+                instance.properties.insert(vm.constants.__time, (Value::Int(0), false)); 
+                instance.properties.insert(vm.constants.__date, (Value::Int(UNIX_EPOCH_DATE), false)); 
+            },
+            [Value::Instance(ptr), ms] => {
+                let instance = ptr.unwrap_mut();
+                let ms = ms.to_isize();
+                let date = date::add_date_to_duration(UNIX_EPOCH_DATE, ms);
+                instance.properties.insert(vm.constants.__date, (Value::Int(date), false)); 
+                instance.properties.insert(vm.constants.__time, (Value::Int(ms % date::MS_PER_DAY), false)); 
+            },
+            [Value::Instance(ptr), year, month, day, ms] => {
+                let instance = ptr.unwrap_mut();
+                let ms = ms.to_isize();
+                let date = match date::ymd_into_date_checked(year.to_isize(), month.to_u8(), day.to_u8()) {
+                    Some(date) => date,
+                    None => return Err(RuntimeError::new(vm, format!("[Date.init]: Improper date {}/{}/{}.", year, month, day)))
+                };
+
+                if ms > date::MS_PER_DAY {
+                    return Err(RuntimeError::new(vm, format!("[Date.init]: Improper milliseconds {}.", ms)))
+                }
+
+                instance.properties.insert(vm.constants.__date, (Value::Int(date), false)); 
+                instance.properties.insert(vm.constants.__time, (Value::Int(ms), false)); 
+            }
+            _ => return Err(RuntimeError::new(vm, "[Date.init]: Expected (Date, int) or (Date, null) or (Date, year, month, date, ms) arguments."))
+        }
+
+        Ok(Value::Null)
+    });
 
     date.native_fn("now", |_, _| Ok(Value::Int(
         SystemTime::now()
@@ -159,6 +245,137 @@ pub fn init_date(vm: &mut Vm) -> Value {
             .unwrap()
             .as_millis() as isize
     )));
+
+    date.prototype_fn("getDate", |vm, args| {
+        let date = unwrap_date(vm, args);
+        Ok(Value::Int(date::date_into_ymd(date).2 as isize))
+    });
+
+    date.prototype_fn("getYear", |vm, args| {
+        let date = unwrap_date(vm, args);
+        Ok(Value::Int(date >> 9))
+    });
+
+    date.prototype_fn("getMonth", |vm, args| {
+        let date = unwrap_date(vm, args);
+        Ok(Value::Int(date::date_into_ymd(date).1 as isize))
+    });
+
+    date.prototype_fn("getSeconds", |vm, args| {
+        Ok(Value::Int(unwrap_time(vm, args) / date::MS_PER_SECOND))
+    });
+
+    date.prototype_fn("getMinutes", |vm, args| {
+        Ok(Value::Int(unwrap_time(vm, args) / date::MS_PER_MINUTE))
+    });
+
+    date.prototype_fn("getHours", |vm, args| {
+        Ok(Value::Int(unwrap_time(vm, args) / date::MS_PER_HOUR))
+    });
+
+    date.prototype_fn("getTime", |vm, args| {
+        let (date, time) = unwrap_both(vm, args);
+        Ok(Value::Int(date::date_time_to_ms(date, time)))
+    });
+
+    date.prototype_fn("setDate", |vm, args| {
+        match args.get(0..2) {
+            Some([Value::Instance(ptr), date]) => {
+                let new_date = date.to_u8();
+                let instance = ptr.unwrap_mut();
+                let (year, month, _) = date::date_into_ymd(unwrap_date_entry(instance.properties.get(&vm.constants.__date)));
+
+                {
+                    let max_days = date::number_of_days_in_month(month, year).unwrap();
+                    if (new_date <= 0) || (new_date > max_days) {
+                        return Err(RuntimeError::new(vm, format!("[Date.setDate]: Expected a date within the range of 1..={}. But found {}.", max_days, new_date)));
+                    }
+                }
+
+                instance.properties.insert(vm.constants.__date, (Value::Int(date::ymd_into_date(year, month, new_date)), false));
+                Ok(Value::Null)
+            },
+            _ => Err(RuntimeError::new(vm, "[Date.setDate]: Expected (Date, int) arguments."))
+        }
+    });
+
+    date.prototype_fn("setYear", |vm, args| {
+        match args.get(0..2) {
+            Some([Value::Instance(ptr), date]) => {
+                let year = date.to_isize();
+                let instance = ptr.unwrap_mut();
+                let (_, month, date) = date::date_into_ymd(unwrap_date_entry(instance.properties.get(&vm.constants.__date)));
+
+                if (year < -100_000) || (year > 100_000) {
+                    return Err(RuntimeError::new(vm, "[Date.setYear]: Expected the year to be in the range of -100_000..100_000"));
+                }
+
+                instance.properties.insert(vm.constants.__date, (Value::Int(date::ymd_into_date(year, month, date)), false));
+                Ok(Value::Null)
+            },
+            _ => Err(RuntimeError::new(vm, "[Date.setDate]: Expected (Date, int) arguments."))
+        }
+    });
+
+    date.prototype_fn("setMonth", |vm, args| {
+        match args.get(0..2) {
+            Some([Value::Instance(ptr), date]) => {
+                let month = date.to_u8();
+                let instance = ptr.unwrap_mut();
+                let (year, _, date) = date::date_into_ymd(unwrap_date_entry(instance.properties.get(&vm.constants.__date)));
+
+                if (month == 0) || (month > 12) {
+                    return Err(RuntimeError::new(vm, "[Date.setMonth]: Expected the month to be in the range of 1..=12"));
+                }
+
+                instance.properties.insert(vm.constants.__date, (Value::Int(date::ymd_into_date(year, month, date)), false));
+                Ok(Value::Null)
+            },
+            _ => Err(RuntimeError::new(vm, "[Date.setDate]: Expected (Date, int) arguments."))
+        }
+    });
+
+    date.prototype_fn("setTime", |vm, args| {
+        match args.get(0..2) {
+            Some([Value::Instance(ptr), time]) => {
+                let instance = ptr.unwrap_mut();
+                let ms = time.to_isize();
+                let date = date::add_date_to_duration(UNIX_EPOCH_DATE, ms);
+                instance.properties.insert(vm.constants.__date, (Value::Int(date), false)); 
+                instance.properties.insert(vm.constants.__time, (Value::Int(ms % date::MS_PER_DAY), false)); 
+
+                Ok(Value::Null)
+            },
+            _ => Err(RuntimeError::new(vm, "[Date.setDate]: Expected (Date, int) arguments."))
+        }
+    });
+
+    macro_rules! set_amount {
+        ($vm:expr, $args:expr, $x:expr) => {
+            match $args.get(0..2) {
+                Some([Value::Instance(ptr), value]) => {
+                    let instance = ptr.unwrap_mut();
+                    let value = value.to_isize();
+                    instance.properties.insert($vm.constants.__time, (Value::Int(value * $x), false)); 
+    
+                    Ok(Value::Null)
+                },
+                _ => Err(RuntimeError::new($vm, "[Date.setDate]: Expected (Date, int) arguments."))
+            }
+        };
+    }
+
+    date.prototype_fn("setSeconds", |vm, args| {
+        set_amount!(vm, args, 1000)
+    });
+
+    date.prototype_fn("setMinutes", |vm, args| {
+        set_amount!(vm, args, date::MS_PER_MINUTE)
+    });
+
+    date.prototype_fn("setHours", |vm, args| {
+        set_amount!(vm, args, date::MS_PER_HOUR)
+    });
 
     Value::Dict(date.allocate_value_ptr())
 }
@@ -201,4 +418,149 @@ pub fn init_json(vm: &mut Vm) -> Value {
     });
 
     Value::Dict(json.allocate_value_ptr())
+}
+
+pub fn init_process(vm: &mut Vm) -> Value {
+    let mut process = ClassBuilder::new(vm);
+
+    process.init(|vm, args| {
+        // Unsafe becase this can chaneg stuff of other resources by wrong rid.
+        if !vm.permissions.unsafe_libs {
+            return Err(RuntimeError::new(vm, "[Process.init]: Initiating process manually requires the `--unsafe` flag."))
+        }
+
+        match args.get(0..3) {
+            Some([Value::Instance(ptr), rid, pid]) => {
+                let instance = ptr.unwrap_mut();
+                instance.properties.insert(vm.constants.rid, (*rid, true));
+                instance.properties.insert(vm.constants.pid, (*pid, true)); 
+
+                if let Some(&[stdin, stdout, stderr]) = args.get(4..7) {
+                    instance.properties.insert(vm.constants.stdin, (stdin, true));
+                    instance.properties.insert(vm.constants.stdout, (stdout, true));
+                    instance.properties.insert(vm.constants.stderr, (stderr, true));
+                }
+
+                Ok(Value::Null)
+            },
+            _ => return Err(RuntimeError::new(vm, "[Process.init]: Expected (Process, rid, pid) arguments."))
+        }
+    });
+
+    let (class, prototype) = process.allocate_value_ptr_with_prototype();
+    vm.constants.process_prototype = prototype;
+
+    Value::Dict(class)
+}
+
+pub fn init_event_emitter(vm: &mut Vm) -> Value {
+    let mut event_emitter = ClassBuilder::new(vm);
+
+    event_emitter.init(|vm, args| {
+        if let Some(target) = args.get(0) {
+            let empty_entries = Value::Dict(vm.allocate_value_ptr(Map::new()));
+            vm.set_attr(*target, vm.constants.__listeners, empty_entries, false)?;
+        }
+
+        Ok(Value::Null)
+    });
+
+    event_emitter.prototype_fn("on", |vm, args| {
+        match args.get(0..3) {
+            Some([Value::Instance(ptr), key, callback]) if callback.is_function() => {
+                let instance = ptr.unwrap_mut();
+                if let Some((Value::Dict(ptr), _)) = instance.properties.get(&vm.constants.__listeners) {
+                    let __listeners = ptr.unwrap_mut();
+                    match __listeners.get(key) {
+                        Some((Value::Array(ptr), _)) => ptr.unwrap_mut().push(*callback),
+                        _ => {
+                            let callbacks = Value::Array(vm.allocate_value_ptr(vec![*callback]));
+                            __listeners.insert(*key, (callbacks, false));
+                        }
+                    }
+                } 
+
+                Ok(Value::Null)
+            },
+            _ => Err(RuntimeError::new(vm, "[EventEmitter.on]: Expected (EventEmitter, string, function) arguments."))
+        }
+    });
+
+    event_emitter.prototype_fn("emit", |vm, args| {
+        match args.get(0..2) {
+            Some([Value::Instance(ptr), key]) => {
+                let instance = ptr.unwrap_mut();
+                if let Some((Value::Dict(ptr), _)) = instance.properties.get(&vm.constants.__listeners) {
+                    if let Some((Value::Array(array_ptr), _)) = ptr.unwrap_mut().get(key) {
+                        let parameters = &args[2..];
+                        let len = parameters.len() as u8;
+                        vm.stack.extend_from_slice(parameters);
+
+                        for callback in array_ptr.unwrap_ref() {
+                            vm.call_function_with_returned_value(*callback, len)?;
+                        }
+                    }
+                } 
+
+                Ok(Value::Null)
+            },
+            _ => Err(RuntimeError::new(vm, "[EventEmitter.emit]: Expected (EventEmitter, string, ...args) arguments."))
+        }
+    });
+
+    event_emitter.prototype_fn("off", |vm, args| {
+        match args.get(0..3) {
+            Some([Value::Instance(ptr), key, callback]) if callback.is_function() => {
+                let instance = ptr.unwrap_mut();
+                if let Some((Value::Dict(ptr), _)) = instance.properties.get(&vm.constants.__listeners) {
+                    if let Some((Value::Array(ptr), _)) = ptr.unwrap_mut().get(key) {
+                        let mut index = 0;
+                        let callbacks = ptr.unwrap_mut();
+                        while let Some(callback_) = callbacks.get(index) {
+                            if callback_ == callback {
+                                callbacks.remove(index);
+                            }
+
+                            index += 1;
+                        }
+                    }
+                } 
+
+                Ok(Value::Null)
+            },
+            _ => Err(RuntimeError::new(vm, "[EventEmitter.on]: Expected (EventEmitter, string, function) arguments."))
+        }
+    });
+
+    Value::Dict(event_emitter.allocate_value_ptr())
+}
+
+pub fn initiate_process_instance(
+    vm: &mut Vm, 
+    rid: u32, 
+    pid: u32, 
+    stdout: Option<u32>,
+    stdin: Option<u32>,
+    stderr: Option<u32>
+) -> Value {
+    let mut properties = Map::with_capacity(2);
+    properties.insert(vm.constants.pid, (Value::Int(pid as _), true));
+    properties.insert(vm.constants.rid, (Value::Int(rid as _), true));
+
+    macro_rules! if_let_stdio {
+        ($($key:ident)+) => {
+            $(if let Some(rid) = $key {
+                properties.insert(vm.constants.$key, (Value::Int(rid as _), true));
+            })+
+        };
+    }
+
+    if_let_stdio! { stdout stdin stderr }
+
+    Value::Instance(vm.allocate_value_ptr(
+        Instance { 
+            properties, 
+            methods: vm.constants.process_prototype
+        }
+    ))
 }

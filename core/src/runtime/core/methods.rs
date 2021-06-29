@@ -190,17 +190,33 @@ pub mod boolean {
 
 pub mod object {
 
-    use crate::{Vm, Value, RuntimeError, RuntimeErrorKind};
+    use crate::{Vm, Value, RuntimeError, Map};
     use crate::runtime::core::map_builder::MapBuilder; 
 
     pub fn init(vm: &mut Vm) {
         let mut object_ = MapBuilder::new(vm);
 
+        object_.native_fn("create", |vm, args| Ok(
+            match args.get(0) {
+                Some(Value::Dict(ptr)) => {
+                    let mut object = Map::with_capacity(1);
+                    object.insert(vm.constants.prototype, (Value::Dict(*ptr), true));
+                    Value::Dict(vm.allocate_value_ptr(object))
+                },
+                _ => return Err(RuntimeError::new(vm, "[Object.create]: Expected (object) arguments."))
+            }
+        ));
+
         object_.native_fn("defineProperty", |vm, args| {
             match args.get(0..3) {
                 Some(&[Value::Dict(ptr), key, value]) => {
                     if let Some((_, true)) = ptr.unwrap_mut().insert(key, (value, false)) {
-                        return Err(RuntimeError::new(vm, RuntimeErrorKind::CannotAssignToReadonlyProperty))
+                        return Err(RuntimeError::new_uncatchable(vm, format!("[Object.defineReadonlyProperty]: The key {:?} is private to assign.", key)))
+                    }
+                },
+                Some(&[Value::Instance(ptr), key, value]) => {
+                    if let Some((_, true)) = ptr.unwrap_map_mut().insert(key, (value, false)) {
+                        return Err(RuntimeError::new_uncatchable(vm, format!("[Object.defineReadonlyProperty]: The key {:?} is private to assign.", key)))
                     }
                 },
                 _ => ()
@@ -209,29 +225,16 @@ pub mod object {
             Ok(Value::Null)
         });
 
-        object_.native_fn("defineReadonlyProperty", |_, args| {
+        object_.native_fn("defineReadonlyProperty", |vm, args| {
             match args.get(0..3) {
                 Some(&[Value::Dict(ptr), key, value]) => {
                     if let Some((_, true)) = ptr.unwrap_mut().insert(key, (value, true)) {
-                        return Err(RuntimeError::new_untraced(RuntimeErrorKind::CannotAssignToReadonlyProperty))
+                        return Err(RuntimeError::new_uncatchable(vm, format!("[Object.defineReadonlyProperty]: The key {:?} is private to assign.", key)))
                     }
                 },
-                _ => ()
-            }
-
-            Ok(Value::Null)
-        });
-
-        object_.native_fn("defineMethod", |vm, args| {
-            match args.get(0..3) {
-                Some(&[Value::Dict(ptr), key, value]) => {
-                    match value {
-                        Value::Function(ptr) => ptr.unwrap_mut().to_instance(),
-                        _ => return Err(RuntimeError::new_str(vm, "Expected (object, string, function[non-native]) arguments."))
-                    };
-
-                    if let Some((_, true)) = ptr.unwrap_mut().insert(key, (value, true)) {
-                        return Err(RuntimeError::new_kind(vm, RuntimeErrorKind::CannotAssignToReadonlyProperty))
+                Some(&[Value::Instance(ptr), key, value]) => {
+                    if let Some((_, true)) = ptr.unwrap_map_mut().insert(key, (value, true)) {
+                        return Err(RuntimeError::new_uncatchable(vm, format!("[Object.defineReadonlyProperty]: The key {:?} is private to assign.", key)))
                     }
                 },
                 _ => ()
@@ -243,11 +246,18 @@ pub mod object {
         object_.native_fn("convertIntoReadonlyObject", |_, args| Ok(
             match args.get(0) {
                 Some(Value::Dict(ptr)) => {
-                    for (_, value) in ptr.unwrap_mut().iter_mut() {
+                    for (_, value) in ptr.unwrap_mut() {
                         *value = (value.0, true);
                     }
 
                     Value::Dict(*ptr)
+                },
+                Some(Value::Instance(ptr)) => {
+                    for (_, value) in ptr.unwrap_map_mut() {
+                        *value = (value.0, true);
+                    }
+
+                    Value::Instance(*ptr)
                 },
                 _ => Value::Null
             }
@@ -258,6 +268,14 @@ pub mod object {
                 Some(Value::Dict(ptr)) => {
                     let mut entries = Vec::new();
                     for (key, value) in ptr.unwrap_ref() {
+                        entries.push(Value::Array(vm.allocate_value_ptr(vec![*key, value.0])))
+                    }
+
+                    Value::Array(vm.allocate_value_ptr(entries))
+                },
+                Some(Value::Instance(ptr)) => {
+                    let mut entries = Vec::new();
+                    for (key, value) in ptr.unwrap_map() {
                         entries.push(Value::Array(vm.allocate_value_ptr(vec![*key, value.0])))
                     }
 
@@ -277,6 +295,14 @@ pub mod object {
 
                     Value::Array(vm.allocate_value_ptr(keys))
                 },
+                Some(Value::Instance(ptr)) => {
+                    let mut keys = Vec::new();
+                    for (key, _) in ptr.unwrap_map() {
+                        keys.push(*key);
+                    }
+
+                    Value::Array(vm.allocate_value_ptr(keys))
+                },
                 _ => Value::Null
             }
         ));
@@ -286,6 +312,14 @@ pub mod object {
                 Some(Value::Dict(ptr)) => {
                     let mut values = Vec::new();
                     for (_, (value, _)) in ptr.unwrap_ref() {
+                        values.push(*value);
+                    }
+
+                    Value::Array(vm.allocate_value_ptr(values))
+                },
+                Some(Value::Instance(ptr)) => {
+                    let mut values = Vec::new();
+                    for (_, (value, _)) in ptr.unwrap_map() {
                         values.push(*value);
                     }
 
@@ -305,16 +339,56 @@ pub mod object {
 
                     Ok(Value::Null)
                 },
-                _ => return Err(RuntimeError::new_str(vm, "Wanted (object, ..keys) arguments."))
+                Some(Value::Instance(ptr)) => {
+                    let map = ptr.unwrap_map_mut();
+                    for key in args.get(1..).unwrap() {
+                        map.remove(key);
+                    }
+
+                    Ok(Value::Null)
+                },
+                _ => return Err(RuntimeError::new(vm, "[Object.remove]: Expected (object, ..keys) arguments."))
             }
         });
 
         object_.native_fn("clone", |vm, args| Ok(
             match args.get(0) {
                 Some(Value::Dict(ptr)) => Value::Dict(vm.allocate_value_ptr(ptr.unwrap())),
+                Some(Value::Instance(ptr)) => Value::Instance(vm.allocate_value_ptr(ptr.unwrap())),
                 _ => Value::Null
             }
         ));
+
+        object_.native_fn("instanceOf", |vm, args| Ok(Value::Bool(
+            match args.get(0..2) {
+                Some([Value::Instance(instance), Value::Dict(ptr)]) => {
+                    match ptr.unwrap_ref().get(&vm.constants.prototype) {
+                        Some((Value::Dict(ptr), _)) => instance.unwrap_ref().methods.0 == ptr.0,
+                        _ => false
+                    }
+                },
+                _ => false
+            }
+        )));
+
+        object_.native_fn("isInstanceObject", |_, args| {
+            Ok(Value::Bool(matches!(args.get(0), Some(Value::Instance(_)))))
+        });
+
+        object_.native_fn("getPrototypeOf", |_, args| Ok(
+            match args.get(0) {
+                Some(Value::Instance(ptr)) => Value::Dict(ptr.unwrap_ref().methods),
+                _ => Value::Null
+            }
+        ));
+
+        object_.native_fn("setPrototypeOf", |_, args| {
+            if let Some([Value::Instance(ptr), Value::Dict(proto)]) = args.get(0..2) {
+                ptr.unwrap_mut().methods = *proto;
+            }
+
+            Ok(Value::Null)
+        });
 
         let object = Value::Dict(object_.allocate_value_ptr());
         vm.add_global("Object", object);
@@ -331,7 +405,6 @@ pub mod function {
         let mut function_object = MapBuilder::new(vm);
         let noop = function_object.vm.allocate_value_ptr(NativeFunction {
             func: |_, _| Ok(Value::Null),
-            is_instance: false,
             name: TinyString::new(b"noop")
         });
 

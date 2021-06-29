@@ -6,6 +6,7 @@ Cargo.lock
 errors.md 
 
 # All the testings
+core.ds
 kek.*
 main_test.*
 main.ds

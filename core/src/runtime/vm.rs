@@ -1,13 +1,15 @@
 extern crate alloc;
 
+use std::rc::Rc;
 use std::{mem, ptr};
+use std::any::TypeId;
 use std::path::PathBuf;
 use std::convert::TryInto;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use super::memory::*;
 use crate::{
-    Value, RuntimeResult, RuntimeErrorKind, RuntimeError, ObjectTrait, Chunk, TinyString, 
-    Function, Upvalue, UpvalueState, FunctionFlags, ValueIter, ValuePtr, opcode, core
+    Value, RuntimeResult, RuntimeError, ObjectTrait, Chunk, TinyString, Function, Upvalue, 
+    UpvalueState, ValueIter, ValuePtr, Instance, Map, Resource, IoResource, opcode, core
 };
 
 macro_rules! read_u8 {
@@ -17,7 +19,7 @@ macro_rules! read_u8 {
                 $self.ip += 1;
                 *byte
             },
-            None => return Err(RuntimeError::new_untraced(RuntimeErrorKind::InsufficientBytes { needed: 1 }))
+            None => return Err(RuntimeError::new_uncatchable($self, "[BytecodeReader]: Corrupted Bytecode. Expected 1 more byte to form u8."))
         }
     };
 }
@@ -29,7 +31,7 @@ macro_rules! read_u16 {
                 $self.ip += 2;
                 u16::from_le_bytes(byte.try_into().unwrap())
             },
-            None => return Err(RuntimeError::new_untraced(RuntimeErrorKind::InsufficientBytes { needed: 2 }))
+            None => return Err(RuntimeError::new_uncatchable($self, "[BytecodeReader]: Corrupted Bytecode. Expected 2 more bytes to form u16."))
         }
     };
 }
@@ -41,7 +43,7 @@ macro_rules! read_u32 {
                 $self.ip += 4;
                 u32::from_le_bytes(byte.try_into().unwrap())
             },
-            None => return Err(RuntimeError::new_untraced(RuntimeErrorKind::InsufficientBytes { needed: 4 }))
+            None => return Err(RuntimeError::new_uncatchable($self, "[BytecodeReader]: Corrupted Bytecode. Expected 4 more bytes to form u32."))
         }
     };
 }
@@ -56,7 +58,7 @@ macro_rules! read_auto {
                         $self.ip += 1;
                         *byte as u32
                     },
-                    None => return Err(RuntimeError::new_untraced(RuntimeErrorKind::InsufficientBytes { needed: 1 }))
+                    None => return Err(RuntimeError::new_uncatchable($self, "[BytecodeReader]: Corrupted Bytecode. Expected 1 more byte to form u8."))
                 }
             },
             1 => {
@@ -66,15 +68,10 @@ macro_rules! read_auto {
                         $self.ip += 4;
                         u32::from_le_bytes(byte.try_into().unwrap())
                     },
-                    None => return Err(RuntimeError::new_untraced(RuntimeErrorKind::InsufficientBytes { needed: 4 }))
+                    None => return Err(RuntimeError::new_uncatchable($self, "[BytecodeReader]: Corrupted Bytecode. Expected 4 more bytes to form u32."))
                 }
             },
-            byte => return Err(RuntimeError::new_untraced(
-                RuntimeErrorKind::UnexpectedByte {
-                    found: byte,
-                    wanted: (0, 1)
-                }
-            ))
+            _ => return Err(RuntimeError::new_uncatchable($self, "[BytecodeReader]: Corrupted Bytecode. Expected 1 more byte as either 1[LONG] or 0[SHORT]."))
         }
     };
 }
@@ -83,12 +80,7 @@ macro_rules! pop_two {
     ($self:expr) => {
         match ($self.stack.pop(), $self.stack.pop()) {
             (Some(rhs), Some(lhs)) => (lhs, rhs),
-            _ => return Err(RuntimeError::new_untraced(
-                RuntimeErrorKind::TooSmallStack {
-                    minimum_len: 2,
-                    actual_len: $self.stack.len()
-                }
-            ))
+            _ => return Err(RuntimeError::new_uncatchable($self, "[VM]: Stack Manipulation Failed. Expected stack length with minimum size as 2 to pop two elements."))
         }
     };
 }
@@ -123,7 +115,19 @@ impl CallFrame {
 #[derive(Default)]
 pub struct VmConstants {
     init: Value,
-    prototype: Value
+    pub(super) prototype: Value,
+    pub(super) __listeners: Value,
+    pub(super) __time: Value,
+    pub(super) __date: Value,
+    pub(super) rid: Value,
+    pub(super) pid: Value,
+    pub(super) stdin: Value,
+    pub(super) stdout: Value,
+    pub(super) stderr: Value,
+    pub(super) cwd: Value,
+    pub(super) cmd: Value,
+    pub(super) env: Value,
+    pub(super) process_prototype: ValuePtr<Map>
 }
 
 #[derive(Default)]
@@ -142,6 +146,8 @@ pub struct Vm {
     pub(crate) array_methods: MethodMap<Vec<Value>>,
     pub(super) call_stack: Vec<CallFrame>,
     pub(super) constants: VmConstants,
+    pub(super) resource_table: BTreeMap<u32, Rc<dyn Resource>>,
+    next_rid: u32,
     flags: HashMap<TinyString, TinyString>,
     open_upvalues: Vec<Upvalue>
 }
@@ -161,9 +167,18 @@ impl Vm {
             ..Default::default()
         };
 
-        vm.constants = VmConstants {
-            init: Value::String(vm.allocate_static_str("init")),
-            prototype: Value::String(vm.allocate_static_str("prototype"))
+        macro_rules! vm_constants {
+            ($($name:ident)+) => {
+                VmConstants {
+                    $($name: Value::String(vm.allocate_static_str(stringify!($name))),)+
+                    process_prototype: ValuePtr::default()
+                }
+            };
+        }
+
+        vm.constants = vm_constants! { 
+            init prototype rid pid stdin stdout stderr cwd cmd env
+            __listeners __time __date 
         };
 
         vm.init_permissions();
@@ -184,25 +199,25 @@ impl Vm {
     }
 
     pub fn handle_error(&mut self, error: RuntimeError) -> RuntimeResult<()> {
-        match &error.kind {
-            RuntimeErrorKind::Panic { value } => {
-                let mut block = None;
-                for &try_block in &self.chunk.try_blocks {
-                    if try_block.0 < self.ip {
-                        block = Some(try_block);
-                    }
+        if error.catchable {
+            let mut block = None;
+            for &try_block in &self.chunk.try_blocks {
+                if try_block.0 < self.ip {
+                    block = Some(try_block);
                 }
+            }
 
-                match block {
-                    Some((_, jump_at, slot)) => {
-                        self.ip = jump_at;
-                        self.add_local(slot as usize, *value);
-                        Ok(())
-                    },
-                    None => return Err(error)
-                }
-            },
-            _ => return Err(error)
+            match block {
+                Some((_, jump_at, slot)) => {
+                    let value = error.to_value(self);
+                    self.ip = jump_at;
+                    self.add_local(slot as usize, value);
+                    Ok(())
+                },
+                None => return Err(error)
+            }
+        } else {
+            Err(error)
         }
     }
 
@@ -223,8 +238,6 @@ impl Vm {
     pub fn execute_byte(&mut self, byte: u8) -> RuntimeResult<()> {
         use opcode::*;
         self.ip += 1;
-
-        //println!("{} {:?}", to_string(byte), self.stack);
 
         match byte {
             TRUE => self.stack.push(Value::Bool(true)),
@@ -307,13 +320,8 @@ impl Vm {
             },
             SET_ATTR => {
                 return match (self.stack.pop(), self.stack.pop(), self.stack.pop()) {
-                    (Some(a), Some(b), Some(c)) => self.set_attr(b, a, c),
-                    _ => Err(RuntimeError::new_untraced(
-                        RuntimeErrorKind::TooSmallStack {
-                            minimum_len: 2,
-                            actual_len: self.stack.len()
-                        }
-                    ))
+                    (Some(a), Some(b), Some(c)) => self.set_attr(b, a, c, false),
+                    _ => return Err(RuntimeError::new_uncatchable(self, "[VM]: Stack Manipulation Failed. Expected stack length with minimum size as 3."))
                 }
             },
             GET_LOCAL => {
@@ -438,13 +446,7 @@ impl Vm {
                     let ptr = self.allocate_value_ptr(array);
                     self.stack.push(Value::Array(ptr));
                 } else {
-                    return Err(RuntimeError::new(
-                        self,
-                        RuntimeErrorKind::TooSmallStack {
-                            minimum_len: array_len as u32,
-                            actual_len: len
-                        }
-                    ))
+                    return Err(RuntimeError::new(self, format!("[VM]: Stack Manipulation Failed. Expected stack length with minimum size as {}", array_len)))
                 }
             },
             DICT => {
@@ -465,69 +467,54 @@ impl Vm {
                     let ptr = self.allocate_value_ptr(entries);
                     self.stack.push(Value::Dict(ptr));
                 } else {
-                    return Err(RuntimeError::new_untraced(
-                        RuntimeErrorKind::TooSmallStack {
-                            minimum_len: entries_len as u32,
-                            actual_len: len
-                        }
-                    ))
+                    return Err(RuntimeError::new(self, format!("[VM]: Stack Manipulation Failed. Expected stack length with minimum size as {}", entries_len)))
                 }
             },
             FUNC => {
-                match self.chunk.bytes.get(self.ip..self.ip + 3) {
-                    Some(&[flags, u16_1, u16_2]) => {
-                        let start = self.ip + 3;
-                        self.ip = start + u16::from_le_bytes([u16_1, u16_2]) as usize;
-
-                        let (max_slots, upvalue_len) = match self.chunk.bytes.get(self.ip..self.ip + 2) {
-                            Some(bytes) => {
-                                self.ip += 2;
-                                (bytes[0], bytes[1])
-                            },
-                            None => return Err(RuntimeError::new_untraced(RuntimeErrorKind::InsufficientBytes { needed: 2 }))
-                        };
-
-                        let mut upvalues = Vec::with_capacity(upvalue_len as usize);
-                        let current_frame = self.call_stack.last().unwrap();
-
-                        for _ in 0..upvalue_len {
-                            match self.chunk.bytes.get(self.ip..self.ip + 2) {
-                                Some(bytes) => {
-                                    let upvalue = if bytes[0] != 0 {
-                                        let upvalue = Upvalue::new_open(current_frame.stack_start + bytes[1] as usize);
-                                        self.open_upvalues.push(upvalue);
-                                        upvalue
-                                    } else {
-                                        current_frame.upvalues[bytes[1] as usize]
-                                    };
-
-                                    upvalues.push(upvalue);
-                                    self.ip += 2;
-                                },
-                                None => return Err(RuntimeError::new_untraced(RuntimeErrorKind::InsufficientBytes { needed: 2 }))
-                            };
-                        }
-
-                        let name = read_auto!(self);
-                        let ptr = self.allocate_value_ptr(
-                            Function {
-                                name: self.chunk.constants.get_string(name),
-                                flags,
-                                start,
-                                upvalues: upvalues.into_boxed_slice(),
-                                max_slots
-                            }
-                        );
-
-                        self.stack.push(Value::Function(ptr))
+                let start = self.ip + 2;
+                self.ip += read_u16!(self) as usize;
+                
+                let (max_slots, upvalue_len, is_async) = match self.chunk.bytes.get(self.ip..self.ip + 3) {
+                    Some(bytes) => {
+                        self.ip += 3;
+                        (bytes[0], bytes[1], bytes[2] != 0)
                     },
-                    _ => return Err(RuntimeError::new_untraced(
-                        RuntimeErrorKind::TooSmallStack {
-                            actual_len: self.chunk.bytes.len(),
-                            minimum_len: 4
-                        }
-                    ))
+                    None => return Err(RuntimeError::new_uncatchable(self, "[BytecodeReader]: Corrupted Bytecode. Expected 2 more bytes to get [MAX_SLOTS, UPVALUES_COUNT, IS_ASYNC[bool]]."))
+                };
+
+                let mut upvalues = Vec::with_capacity(upvalue_len as usize);
+                let current_frame = self.call_stack.last().unwrap();
+
+                for _ in 0..upvalue_len {
+                    match self.chunk.bytes.get(self.ip..self.ip + 2) {
+                        Some(bytes) => {
+                            let upvalue = if bytes[0] != 0 {
+                                let upvalue = Upvalue::new_open(current_frame.stack_start + bytes[1] as usize);
+                                self.open_upvalues.push(upvalue);
+                                upvalue
+                            } else {
+                                current_frame.upvalues[bytes[1] as usize]
+                            };
+
+                            upvalues.push(upvalue);
+                            self.ip += 2;
+                        },
+                        None => return Err(RuntimeError::new_uncatchable(self, "[BytecodeReader]: Corrupted Bytecode. Expected 2 more bytes to get [IS_UPVALUE, UPVALUE_SLOT]."))
+                    };
                 }
+
+                let name = read_auto!(self);
+                let ptr = self.allocate_value_ptr(
+                    Function {
+                        name: self.chunk.constants.get_string(name),
+                        upvalues: upvalues.into_boxed_slice(),
+                        start,
+                        max_slots,
+                        is_async
+                    }
+                );
+
+                self.stack.push(Value::Function(ptr))
             },
             RETURN => {
                 let frame = self.call_stack.pop().unwrap();
@@ -551,16 +538,7 @@ impl Vm {
                 self.ip = frame.ip;
             },
             AND => {
-                let (lhs, rhs) = match (self.stack.pop(), self.stack.pop()) {
-                    (Some(rhs), Some(lhs)) => (lhs, rhs),
-                    _ => return Err(RuntimeError::new_untraced(
-                        RuntimeErrorKind::TooSmallStack {
-                            minimum_len: 2,
-                            actual_len: self.stack.len()
-                        }
-                    ))
-                };
-
+                let (lhs, rhs) = pop_two!(self); 
                 self.stack.push(Value::Bool(lhs.to_bool() && rhs.to_bool()));
             },
             NOT => {
@@ -591,7 +569,7 @@ impl Vm {
                 let (lhs, rhs) = pop_two!(self);
                 self.stack.push(lhs << rhs);
             },
-            _ => return Err(RuntimeError::new_untraced(RuntimeErrorKind::UnknownByte { byte }))
+            _ => return Err(RuntimeError::new_uncatchable(self, format!("[BytecodeReader]: Found an unknown byte {}.", byte)))
         }
 
         Ok(())
@@ -603,10 +581,6 @@ impl Vm {
                 let nf = ptr.unwrap_ref();
                 let stack_offset_index = self.stack.len() - args_len as usize;
                 let args = ptr::slice_from_raw_parts(self.stack.as_mut_ptr().add(stack_offset_index), args_len as usize);
-
-                if nf.is_instance {
-                    return Err(RuntimeError::new_untraced(RuntimeErrorKind::SelfNotFound { name: nf.name.to_string() }));
-                }
 
                 self.call_stack.push(CallFrame { name: nf.name.clone(), ..Default::default() });
                 match (nf.func)(self, &*args) {
@@ -622,19 +596,9 @@ impl Vm {
                 Ok(())
             },
             Value::Function(ptr) => {
-                let Function { 
-                    name, 
-                    max_slots, 
-                    start,
-                    upvalues,
-                    flags
-                } = ptr.unwrap_ref();
-
-                if *flags & FunctionFlags::INSTANCE == FunctionFlags::INSTANCE {
-                    return Err(RuntimeError::new(self, RuntimeErrorKind::SelfNotFound { name: name.to_string() }));
-                }
-
+                let Function { name, max_slots, start, upvalues, .. } = ptr.unwrap_ref();
                 let stack_start = self.stack.len() - args_len as usize;
+
                 self.call_stack.push(CallFrame { 
                     ip: self.ip, 
                     stack_start, 
@@ -651,13 +615,20 @@ impl Vm {
             Value::Dict(ptr) => {
                 let map = ptr.unwrap_ref();
                 let self_ = match map.get(&self.constants.prototype) {
-                    Some(&(Value::Dict(ptr), _)) => Value::Dict(self.allocate_value_ptr(ptr.unwrap())),
-                    _ => return Err(RuntimeError::new(self, RuntimeErrorKind::CallingAObjectWithoutProperPrototype))
+                    Some(&(Value::Dict(ptr), _)) => {
+                        let instance = Instance {
+                            properties: Map::new(),
+                            methods: ptr
+                        };
+
+                        Value::Instance(self.allocate_value_ptr(instance))
+                    },
+                    _ => return Err(RuntimeError::new(self, "Cannot call object which has no prototype initiated."))
                 };
 
                 match map.get(&self.constants.init) {
                     Some(init_) => {
-                        self.stack.insert((self.stack.len() - args_len as usize) - 1, self_);
+                        self.stack.insert(self.stack.len() - args_len as usize, self_);
                         match self.call_function_with_returned_value(init_.0, args_len + 1) {
                             Ok(_) => {
                                 self.stack.push(self_);
@@ -673,7 +644,7 @@ impl Vm {
                     }
                 }
             },
-            value => Err(RuntimeError::new_kind(self, RuntimeErrorKind::CalledAnUncallable { value_type: value.get_type().to_string() }))
+            value => Err(RuntimeError::new(self, format!("You cannot call a {}.", value.get_type())))
         }
     }
 
@@ -726,7 +697,35 @@ impl Vm {
 
                 Ok(Value::Null)
             },
-            value => Err(RuntimeError::new_kind(self, RuntimeErrorKind::CalledAnUncallable { value_type: value.get_type().to_string() }))
+            Value::Dict(ptr) => {
+                let map = ptr.unwrap_ref();
+                let self_ = match map.get(&self.constants.prototype) {
+                    Some(&(Value::Dict(ptr), _)) => {
+                        let instance = Instance {
+                            properties: Map::new(),
+                            methods: ptr
+                        };
+
+                        Value::Instance(self.allocate_value_ptr(instance))
+                    },
+                    _ => return Err(RuntimeError::new(self, "Cannot call object which has no prototype initiated."))
+                };
+
+                match map.get(&self.constants.init) {
+                    Some(init_) => {
+                        self.stack.insert((self.stack.len() - args_len as usize) - 1, self_);
+                        match self.call_function_with_returned_value(init_.0, args_len + 1) {
+                            Ok(_) => Ok(self_),
+                            Err(error) => Err(error)
+                        }
+                    },
+                    None => {
+                        self.stack.truncate(self.stack.len() - args_len as usize);
+                        Ok(self_)
+                    }
+                }
+            },
+            value => Err(RuntimeError::new(self, format!("You cannot call a {}.", value.get_type())))
         }
     }
 
@@ -747,71 +746,19 @@ impl Vm {
                                     Err(error) => return Err(error)
                                 }
                             },
-                            None => Err(RuntimeError::new_untraced(RuntimeErrorKind::CalledAnUncallable { value_type: "null".to_owned() }))
+                            None => Err(RuntimeError::new(self, "You cannot call a null."))
                         }
                     },
-                    _ => Err(RuntimeError::new_untraced(RuntimeErrorKind::CalledAnUncallable { value_type: "null".to_owned() }))
+                    value => Err(RuntimeError::new(self, format!("You cannot call a {}.", value.get_type())))
                 }
             };
         }
 
-        let mut call = |value: Value| match value {
-            Value::NativeFn(ptr) => unsafe {
-                let nf = ptr.unwrap_ref();
-                let stack_offset_index = self.stack.len() - args_len as usize;
-
-                if nf.is_instance {
-                    self.stack.insert(stack_offset_index, self_);
-                }
-
-                let args = ptr::slice_from_raw_parts(self.stack.as_ptr().add(stack_offset_index), args_len as usize);
-                self.call_stack.push(CallFrame { name: nf.name.clone(), ..Default::default() });
-
-                match (nf.func)(self, &*args) {
-                    Ok(value) => {
-                        self.call_stack.pop();
-                        self.stack.set_len(stack_offset_index);
-                        ptr::drop_in_place(args as *mut [Value]);
-
-                        self.stack.push(value);
-                    },
-                    Err(error) => return Err(error)
-                }
-
-                Ok(())
-            },
-            Value::Function(ptr) => {
-                let Function { 
-                    name, 
-                    max_slots, 
-                    start,
-                    upvalues,
-                    flags,
-                    ..
-                } = ptr.unwrap();
-
-                let stack_start = self.stack.len() - args_len as usize;
-                if flags & FunctionFlags::INSTANCE == FunctionFlags::INSTANCE {
-                    self.stack.insert(stack_start, self_);
-                }
-
-                self.call_stack.push(CallFrame { ip: self.ip, stack_start, name, upvalues: upvalues.to_vec(), max_slots });
-                self.stack.resize(stack_start + max_slots as usize, Value::Null);
-                self.ip = start;
-                Ok(())
-            },
-            _ => Err(RuntimeError::new_untraced(
-                RuntimeErrorKind::CalledAnUncallable {
-                    value_type: "null".to_owned()
-                }
-            ))
-        };
-
         match self_ {
             Value::Dict(ptr) => {
                 match ptr.unwrap_ref().get(&attr) {
-                    Some((value, _)) => call(*value),
-                    None => Err(RuntimeError::new_untraced(RuntimeErrorKind::CalledAnUncallable { value_type: "null".to_owned() }))
+                    Some((value, _)) => self.call_function(*value, args_len),
+                    None => Err(RuntimeError::new(self, "You cannot call a null"))
                 }
             },
             Value::Array(ptr) => {
@@ -820,8 +767,8 @@ impl Vm {
                 match attr {
                     Value::Int(int) => {
                         match array.get(int as usize) {
-                            Some(value) => call(*value),
-                            None => Err(RuntimeError::new_untraced(RuntimeErrorKind::CalledAnUncallable { value_type: "null".to_owned() }))
+                            Some(value) => self.call_function(*value, args_len),
+                            None => Err(RuntimeError::new(self, "You cannot call a null."))
                         }
                     },
                     Value::String(string) => {
@@ -837,15 +784,26 @@ impl Vm {
                                     Err(error) => return Err(error)
                                 }
                             },
-                            None => Err(RuntimeError::new_untraced(RuntimeErrorKind::CalledAnUncallable { value_type: "null".to_owned() }))
+                            None => Err(RuntimeError::new(self, "You cannot call a null."))
                         }
                     },
-                    _ => Err(RuntimeError::new_untraced(RuntimeErrorKind::CalledAnUncallable { value_type: "null".to_owned() }))
+                    _ => Err(RuntimeError::new(self, "Cannot call a null."))
+                }
+            },
+            Value::Instance(ptr) => {
+                let instance = ptr.unwrap_ref();
+                if let Some(method) = instance.methods.unwrap_ref().get(&attr) {
+                    self.stack.insert(self.stack.len() - args_len as usize, self_);
+                    self.call_function(method.0, args_len + 1)
+                } else if let Some(property) = instance.properties.get(&attr) {
+                    self.call_function(property.0, args_len)
+                } else {
+                    Err(RuntimeError::new(self, "Cannot call a null."))
                 }
             },
             Value::Iterator(ptr) => inst_method!(ptr, iterator_methods),
             Value::String(ptr) => inst_method!(ptr, string_methods),
-            _ => Err(RuntimeError::new_untraced(RuntimeErrorKind::CalledAnUncallable { value_type: "null".to_owned() }))
+            _ => Err(RuntimeError::new(self, format!("Cannot call a {}.", self_.get_type())))
         }
     }
 
@@ -889,15 +847,25 @@ impl Vm {
                     _ => Value::Null
                 }
             },
+            Value::Instance(ptr) => {
+                let instance = ptr.unwrap_ref();
+                
+                match instance.properties
+                        .get(&attr)
+                        .or_else(|| instance.methods.unwrap_ref().get(&attr)) {
+                    Some((value, _)) => *value,
+                    None => Value::Null
+                }
+            },
             _ => Value::Null
         }
     }
 
-    fn set_attr(&mut self, target: Value, attr: Value, value: Value) -> RuntimeResult<()> {
+    pub(super) fn set_attr(&mut self, target: Value, attr: Value, value: Value, readonly: bool) -> RuntimeResult<()> {
         match target {
             Value::Dict(ptr) => {
-                if let Some((_, true)) = ptr.unwrap_mut().insert(attr, (value, true)) {
-                    return Err(RuntimeError::new_untraced(RuntimeErrorKind::CannotAssignToReadonlyProperty))
+                if let Some((_, true)) = ptr.unwrap_mut().insert(attr, (value, readonly)) {
+                    return Err(RuntimeError::new(self, format!("Cannot assign value to property {} which is a readonly property.", attr)))
                 }
             },
             Value::Array(ptr) => {
@@ -918,7 +886,12 @@ impl Vm {
                     _ => ()
                 }
             },
-            _ => ()
+            Value::Instance(ptr) => {
+                if let Some((_, true)) = ptr.unwrap_mut().properties.insert(attr, (value, readonly)) {
+                    return Err(RuntimeError::new(self, format!("Cannot assign value to property {} which is a readonly property.", attr)))
+                }
+            },
+            _ => return Err(RuntimeError::new(self, format!("Cannot set property {} to {}.", attr, target)))
         }
 
         Ok(())
@@ -979,6 +952,31 @@ impl Vm {
 
     pub(crate) fn allocate_string(&mut self, string: String) -> ValuePtr<TinyString> {
         ValuePtr::new_unchecked(self.allocate(TinyString::new(string.as_bytes())))
+    }
+
+    pub fn get_resource<T: Resource>(&self, resource_id: u32) -> Option<Rc<T>> {
+        self.resource_table.get(&resource_id)
+            .and_then(|rc| unsafe {
+                if rc.type_id() == TypeId::of::<T>() {
+                    Some((*(rc as *const Rc<_> as *const Rc<T>)).clone())
+                } else { None }
+            })
+    }
+
+    pub fn get_io_resource(&self, resource_id: u32) -> Option<Rc<dyn IoResource>> {
+        self.resource_table.get(&resource_id)
+            .and_then(|rc| unsafe {
+                if rc.is_io() {
+                    Some((*(rc as *const Rc<_> as *const Rc<dyn IoResource>)).clone())
+                } else { None }
+            })
+    }
+
+    pub(crate) fn add_resource<T: Resource>(&mut self, resource: T) -> u32 {
+        let rid = self.next_rid;
+        assert!(self.resource_table.insert(self.next_rid, Rc::new(resource)).is_none());
+        self.next_rid += 1;
+        rid
     }
 
     pub fn collect_garbage(&mut self) {

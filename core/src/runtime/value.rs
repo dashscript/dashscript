@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::string::ToString;
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
-use crate::{TinyString, Map, ValueIter, Vm, ValuePtr, Function, NativeFunction};
+use crate::{TinyString, Map, ValueIter, Vm, ValuePtr, Function, NativeFunction, Instance};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
@@ -18,6 +18,7 @@ pub enum Value {
     Function(ValuePtr<Function>),
     NativeFn(ValuePtr<NativeFunction>),
     Iterator(ValuePtr<ValueIter>),
+    Instance(ValuePtr<Instance>),
     Null // The basic null or empty value
 }
 
@@ -45,7 +46,7 @@ impl Value {
             Self::Int(int) => TinyString::new(format!("{}", int).as_bytes()),
             Self::Float(float) => TinyString::new(format!("{}", float).as_bytes()),
             Self::String(ptr) => ptr.unwrap(),
-            Self::Dict(_) => TinyString::new(b"[Object]"),
+            Self::Dict(_) | Self::Instance(_) => TinyString::new(b"[Object]"),
             Self::Array(_) => TinyString::new(b"[Array]"),
             Self::Function(_) | Self::NativeFn(_) => TinyString::new(b"[Function]"),
             Self::Iterator(_) => TinyString::new(b"[Iterator]"),
@@ -77,7 +78,7 @@ impl Value {
             Self::Int(int) => int.to_string(),
             Self::Float(float) => float.to_string(),
             Self::String(bytes) => format!("\"{}\"", bytes.unwrap_ref()),
-            Self::Dict(_) => "[Object]".to_owned(),
+            Self::Dict(_)  | Self::Instance(_) => "[Object]".to_owned(),
             Self::Array(_) => "[Array]".to_owned(),
             Self::Function(_) | Self::NativeFn(_) => "[Function]".to_owned(),
             Self::Iterator(_) => "[Iterator]".to_owned(),
@@ -109,6 +110,14 @@ impl Value {
         }
     }
 
+    pub fn to_u8(&self) -> u8 {
+        match self {
+            Value::Int(int) => *int as u8,
+            Value::Float(float) => *float as u8,
+            _ => 0
+        }
+    }
+
     pub fn to_u32(&self) -> u32 {
         match self {
             Value::Int(int) => *int as u32,
@@ -133,7 +142,7 @@ impl Value {
                 Self::Int(_) | Self::Float(_) => b"number",
                 Self::String(_) => b"string",
                 Self::Array(_) => b"array",
-                Self::Dict(_) => b"object",
+                Self::Dict(_) | Self::Instance(_) => b"object",
                 Self::Iterator(_) => b"iterator",
                 Self::Function(_) | Self::NativeFn(_) => b"function"
             }
@@ -171,6 +180,10 @@ impl Value {
             Value::Int(int) => Value::Int(!int),
             _ => Value::Int(-1)
         }
+    }
+
+    pub fn is_function(&self) -> bool {
+        matches!(self, Value::Function(_) | Value::NativeFn(_))
     }
 
 }
@@ -343,7 +356,8 @@ impl Hash for Value {
             Self::Dict(ptr) => hash_ptr!(ptr),
             Self::Function(ptr) => hash_ptr!(ptr),
             Self::NativeFn(ptr) => hash_ptr!(ptr),
-            Self::Iterator(ptr) => hash_ptr!(ptr)
+            Self::Iterator(ptr) => hash_ptr!(ptr),
+            Self::Instance(ptr) => hash_ptr!(ptr)
         }
     }
 }
@@ -358,6 +372,7 @@ impl PartialEq for Value {
             (Value::Dict(a), Value::Dict(b)) => a == b,
             (Value::Function(a), Value::Function(b)) => a == b,
             (Value::NativeFn(a), Value::NativeFn(b)) => a == b,
+            (Value::Instance(a), Value::Instance(b)) => a == b,
             (Value::Null, Value::Null) => true,
             _ => false
         }
@@ -416,6 +431,14 @@ impl Display for Value {
                 }
                 
                 write!(f, "]")
+            },
+            Value::Instance(instance) => {
+                write!(f, "{{\n")?;
+                for (key, value) in instance.unwrap_ref().properties.iter() {
+                    write!(f, "    {}: {},\n", key.to_string(), value.0.to_string()).unwrap();
+                }
+
+                write!(f, "}}")
             },
             Value::Function(_) | Value::NativeFn(_) => write!(f, "[Function]"),
             Value::Iterator(_) => write!(f, "[Iterator]")

@@ -1,6 +1,6 @@
 use std::fmt::{self, Debug, Formatter};
 use std::collections::HashMap;
-use crate::{RuntimeResult, Value, TinyString, Vm, FunctionFlags, Upvalue, ValueIter};
+use crate::{RuntimeResult, Value, TinyString, Vm, Upvalue, ValueIter, ValuePtr};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ObjectKind {
@@ -9,7 +9,8 @@ pub enum ObjectKind {
     Array,
     Map,
     Iterator,
-    String
+    String,
+    Instance
 }
 
 pub trait ObjectTrait {
@@ -34,27 +35,18 @@ pub type NativeFunctionHandler = fn (&mut Vm, &[Value]) -> RuntimeResult<Value>;
 #[derive(Clone)]
 pub struct NativeFunction {
     pub(crate) func: NativeFunctionHandler,
-    pub(crate) is_instance: bool,
     pub(crate) name: TinyString
 }
 
 impl Default for NativeFunction {
     fn default() -> Self {
-        Self {
-            func: |_, _| Ok(Value::Null),
-            is_instance: false,
-            name: TinyString::new(b"anonymous")
-        }
+        Self { func: |_, _| Ok(Value::Null), name: TinyString::new(b"anonymous") }
     }
 }
 
 impl Debug for NativeFunction {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("NativeFunction")
-            .field("func", &String::from("[Function]"))
-            .field("is_instance", &self.is_instance)
-            .field("name", &self.name)
-            .finish()
+        write!(f, "NativeFunction({})", self.name)
     }
 }
 
@@ -64,19 +56,13 @@ pub struct Function {
     pub(crate) upvalues: Box<[Upvalue]>,
     pub(crate) start: usize,
     pub(crate) max_slots: u8,
-    pub(crate) flags: u8
+    pub(crate) is_async: bool
 }
 
-impl Function {
-    pub fn is_instance(&self) -> bool {
-        self.flags & FunctionFlags::INSTANCE == FunctionFlags::INSTANCE
-    }
-
-    pub fn to_instance(&mut self) {
-        if self.flags & FunctionFlags::INSTANCE != FunctionFlags::INSTANCE {
-            self.flags |= FunctionFlags::INSTANCE;
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct Instance {
+    pub(crate) properties: Map,
+    pub(crate) methods: ValuePtr<Map>
 }
 
 impl_default_object_trait! {
@@ -86,4 +72,5 @@ impl_default_object_trait! {
     Function: Function
     ValueIter: Iterator
     TinyString: String
+    Instance: Instance
 }

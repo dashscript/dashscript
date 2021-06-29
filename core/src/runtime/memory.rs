@@ -3,7 +3,8 @@ extern crate alloc;
 use alloc::alloc::Layout;
 use std::marker::PhantomData;
 use std::{ptr, mem};
-use crate::{Value, Map, ValueIter, TinyString};
+use std::fmt::{self, Debug, Formatter};
+use crate::{Value, Map, ValueIter, TinyString, Instance};
 use super::object::{self, ObjectKind};
 
 pub(crate) const USIZE_SIZE: usize = mem::size_of::<usize>();
@@ -131,7 +132,8 @@ impl GcHandle {
             ObjectKind::Map => deallocate!(self.0, Map),
             ObjectKind::Function => deallocate!(self.0, object::Function),
             ObjectKind::Iterator => deallocate!(self.0, ValueIter),
-            ObjectKind::String => deallocate!(self.0, TinyString)
+            ObjectKind::String => deallocate!(self.0, TinyString),
+            ObjectKind::Instance => deallocate!(self.0, object::Instance)
         }
     }
 
@@ -149,7 +151,8 @@ impl GcHandle {
                 ObjectKind::Map => deallocate!(self.0, Map),
                 ObjectKind::Function => deallocate!(self.0, object::Function),
                 ObjectKind::Iterator => deallocate!(self.0, ValueIter),
-                ObjectKind::String => deallocate!(self.0, TinyString)
+                ObjectKind::String => deallocate!(self.0, TinyString),
+                ObjectKind::Instance => deallocate!(self.0, object::Instance)
             };
 
             true
@@ -161,7 +164,7 @@ impl GcHandle {
 
 }
 
-#[derive(Debug, Hash)]
+#[derive(Hash)]
 pub struct ValuePtr<T>(pub(crate) *const u8, PhantomData<T>);
 
 impl<T> ValuePtr<T> {
@@ -218,6 +221,38 @@ impl ValuePtr<TinyString> {
     }
 }
 
+impl ValuePtr<Instance> {
+    pub fn unwrap_map(&self) -> &Map {
+        &self.unwrap_ref().properties
+    }
+
+    pub fn unwrap_map_mut(&self) -> &mut Map {
+        &mut self.unwrap_mut().properties
+    }
+}
+
+impl ValuePtr<Vec<Value>> {
+    pub fn unwrap_bytes(&self) -> Vec<u8> {
+        let array = self.unwrap_ref();
+        let mut bytes = Vec::with_capacity(array.len());
+
+        for value in array {
+            bytes.push(value.to_u8());
+        }
+
+        bytes
+    }
+
+    pub fn write_bytes(&self, bytes: &[u8]) {
+        let array = self.unwrap_mut();
+        array.clear();
+        
+        for byte in bytes {
+            array.push(Value::Int(*byte as _));
+        }
+    }
+}
+
 impl<T> Clone for ValuePtr<T> {
     fn clone(&self) -> Self {
         Self(self.0, PhantomData)
@@ -233,3 +268,15 @@ impl<T> PartialEq for ValuePtr<T> {
 }
 
 impl<T> Eq for ValuePtr<T> {}
+
+impl<T> Debug for ValuePtr<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl<T> Default for ValuePtr<T> {
+    fn default() -> Self {
+        Self(&0u8 as *const u8, PhantomData)
+    }
+}

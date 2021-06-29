@@ -83,8 +83,7 @@ pub struct BytecodeCompiler {
     pub(crate) line_data: Vec<u32>,
     pub(crate) try_blocks: Vec<(usize, usize, u8)>,
     loop_handler: LoopHandler,
-    current_statement_index: usize,
-    instance_depth: Option<u16>
+    current_statement_index: usize
 }
 
 impl BytecodeCompiler {
@@ -451,9 +450,6 @@ impl BytecodeCompiler {
             },
             Expr::Dict(dict) => {
                 let len = dict.len() as u32;
-                let enclosing = self.instance_depth;
-                self.instance_depth = Some(self.depth);
-
                 for (constant_id, expr) in dict {
                     self.load_constant(constant_id, STRING, STRING_LONG);
                     self.load_expr(expr);
@@ -461,19 +457,9 @@ impl BytecodeCompiler {
                 
                 self.bytes.push(DICT);
                 self.load_constant_without_op(len);
-                self.instance_depth = enclosing;
             },
             Expr::Function { name, parameters, inner, is_async } => {
-                let flags = FunctionFlags {
-                    instance_function: if name == 2 { false } else { 
-                        if let Some(depth) = self.instance_depth {
-                            self.depth == depth
-                        } else { false }
-                    },
-                    async_function: is_async
-                };
-
-                self.bytes.extend_from_slice(&[FUNC, flags.into(), 0, 0]);
+                self.bytes.extend_from_slice(&[FUNC, 0, 0]);
                 let offset_ip = self.bytes.len();
 
                 // Basically safe because the pointer it is reading is valid one
@@ -512,7 +498,7 @@ impl BytecodeCompiler {
                 self.update_offset(offset_ip);
 
                 let closure = self.closures.pop().unwrap();
-                self.bytes.extend_from_slice(&[closure.max_slots, closure.upvalues.len() as u8]);
+                self.bytes.extend_from_slice(&[closure.max_slots, closure.upvalues.len() as u8, is_async as u8]);
                 for upvalue in &closure.upvalues {
                     self.bytes.extend_from_slice(&[upvalue.is_local as u8, upvalue.index]);
                 }

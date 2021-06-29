@@ -35,6 +35,20 @@ impl Value {
                 string.push('}');
                 string
             },
+            Value::Instance(instance) => {
+                let mut string = String::from('{');
+                
+                for (key, value) in instance.unwrap_ref().properties.iter() {
+                    string.push_str(key.json_stringify().as_str());
+                    string.push(':');
+                    string.push_str(value.0.json_stringify().as_str());
+                    string.push(',');
+                }
+
+                string.pop();
+                string.push('}');
+                string
+            },
             Value::Function(_) | Value::NativeFn(_) => "\"[Function]\"".to_string(),
             Value::Iterator(_) => "\"[Iterator]\"".to_string()
         }

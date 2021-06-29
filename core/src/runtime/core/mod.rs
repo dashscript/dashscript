@@ -1,13 +1,16 @@
-use std::io;
-use crate::{Vm, Value, TinyString, NativeFunction, RuntimeError, ValueIter};
-
 pub mod builtin;
 pub mod map_builder;
 pub mod json;
 pub mod window;
 pub mod base64;
 pub mod methods;
+pub mod date;
 
+use std::io;
+use std::ffi::OsStr;
+use std::path::Path;
+use std::convert::AsRef;
+use crate::{Vm, Value, TinyString, NativeFunction, RuntimeError, ValueIter};
 use base64::DecoderError;
 
 pub fn init(vm: &mut Vm) {
@@ -15,18 +18,25 @@ pub fn init(vm: &mut Vm) {
     vm.add_global("NaN", Value::NAN);
     vm.add_global("inf", Value::INFINITY);
 
-    let math = builtin::init_math(vm);
-    vm.add_global("Math", math);
+    macro_rules! init_module {
+        ($($name:expr => $method:ident)+) => {
+            $(
+                let $method = builtin::$method(vm);
+                vm.add_global($name, $method);
+            )+
+        };
+    }
 
-    let date = builtin::init_date(vm);
-    vm.add_global("Date", date);
-
-    let json = builtin::init_json(vm);
-    vm.add_global("JSON", json);
+    init_module! {
+        "Math" => init_math
+        "Date" => init_date
+        "JSON" => init_json
+        "EventEmitter" => init_event_emitter
+        "Process" => init_process
+    }
 
     if vm.permissions.memory {
-        let memory = builtin::init_memory(vm);
-        vm.add_global("Memory", memory);
+        init_module! { "Memory" => init_memory }
     }
 
     let window = window::init(vm);
@@ -43,12 +53,7 @@ pub fn init(vm: &mut Vm) {
         ($bytes:expr, $value:expr) => {{
             let name = TinyString::new($bytes);
             let constant_id = vm.chunk.constants.add_string(name.clone());
-            let nf = NativeFunction {
-                name, 
-                func: $value,
-                is_instance: false
-            };
-
+            let nf = NativeFunction { name, func: $value };
             let ptr = vm.allocate_value_ptr(nf);
             vm.globals.insert(constant_id, (Value::NativeFn(ptr), false));
         }};
@@ -75,8 +80,8 @@ pub fn init(vm: &mut Vm) {
         Ok(Value::String(type_))
     });
 
-    native_fn!(b"throw", |_, args| {
-        Err(RuntimeError::from(args.get(0).unwrap_or_default().clone()))
+    native_fn!(b"throw", |vm, args| {
+        Err(RuntimeError::new(vm, format!("{:?}", args.get(0).unwrap_or_default())))
     });
 
     native_fn!(b"parseInt", |_, args| {
@@ -149,13 +154,13 @@ pub fn init(vm: &mut Vm) {
                 match base64::decode(ptr.unwrap_bytes()) {
                     Ok(str_) => Value::String(vm.allocate_value_ptr(str_)),
                     Err(error) => {
-                        return Err(RuntimeError::from(Value::String(vm.allocate_string(
-                            match error {
-                                DecoderError::InvalidLength => format!("The base64 string has invalid length."),
-                                DecoderError::InvalidByte(index, byte) => format!("Invalid byte {} at index {}.", byte, index),
-                                DecoderError::InvalidLastSymbol(index, byte) => format!("Invalid last symbol {} at index {}.", index, byte)
-                            }
-                        ))));
+                        let message = match error {
+                            DecoderError::InvalidLength => format!("[atob]: The base64 string has invalid length."),
+                            DecoderError::InvalidByte(index, byte) => format!("[atob]: Invalid byte {} at index {}.", byte, index),
+                            DecoderError::InvalidLastSymbol(index, byte) => format!("[atob]: Invalid last symbol {} at index {}.", index, byte)
+                        };
+
+                        return Err(RuntimeError::new(vm, message));
                     }
                 }
             },
@@ -171,5 +176,17 @@ impl Value {
             Self::String(bytes) => bytes.unwrap_ref(),
             _ => "null"
         }
+    }
+}
+
+impl AsRef<OsStr> for Value {
+    fn as_ref(&self) -> &OsStr {
+        self.unwrap_string().as_ref()
+    }
+}
+
+impl AsRef<Path> for Value {
+    fn as_ref(&self) -> &Path {
+        self.unwrap_string().as_ref()
     }
 }

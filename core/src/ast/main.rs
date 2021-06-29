@@ -53,7 +53,7 @@ impl AST {
     }
 
     pub fn parse(&mut self) {
-        let mut token = self.lexer.next().unwrap();
+        let mut token = self.lexer.next().unwrap_or_default();
         self.current = token.clone();
 
         loop {
