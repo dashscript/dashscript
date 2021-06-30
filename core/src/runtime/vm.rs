@@ -9,7 +9,8 @@ use std::collections::{HashMap, BTreeMap};
 use super::memory::*;
 use crate::{
     Value, RuntimeResult, RuntimeError, ObjectTrait, Chunk, TinyString, Function, Upvalue, 
-    UpvalueState, ValueIter, ValuePtr, Instance, Map, Resource, IoResource, opcode, core
+    UpvalueState, ValueIter, ValuePtr, Instance, Map, Resource, IoResource, ResourceKind,
+    opcode, core
 };
 
 macro_rules! read_u8 {
@@ -81,6 +82,31 @@ macro_rules! pop_two {
         match ($self.stack.pop(), $self.stack.pop()) {
             (Some(rhs), Some(lhs)) => (lhs, rhs),
             _ => return Err(RuntimeError::new_uncatchable($self, "[VM]: Stack Manipulation Failed. Expected stack length with minimum size as 2 to pop two elements."))
+        }
+    };
+}
+
+macro_rules! handle_error {
+    ($error:expr, $self:expr, $vm:expr) => {
+        if $error.catchable {
+            let mut block = None;
+            for &try_block in &$vm.chunk.try_blocks {
+                if try_block.0 < $self.ip {
+                    block = Some(try_block);
+                }
+            }
+
+            match block {
+                Some((_, jump_at, slot)) => {
+                    let value = $error.to_value($vm);
+                    $self.ip = jump_at;
+                    $vm.add_local(slot as usize, value);
+                    Ok(())
+                },
+                None => return Err($error)
+            }
+        } else {
+            Err($error)
         }
     };
 }
@@ -199,26 +225,7 @@ impl Vm {
     }
 
     pub fn handle_error(&mut self, error: RuntimeError) -> RuntimeResult<()> {
-        if error.catchable {
-            let mut block = None;
-            for &try_block in &self.chunk.try_blocks {
-                if try_block.0 < self.ip {
-                    block = Some(try_block);
-                }
-            }
-
-            match block {
-                Some((_, jump_at, slot)) => {
-                    let value = error.to_value(self);
-                    self.ip = jump_at;
-                    self.add_local(slot as usize, value);
-                    Ok(())
-                },
-                None => return Err(error)
-            }
-        } else {
-            Err(error)
-        }
+        handle_error!(error, self, self)
     }
 
     pub fn execute(&mut self) -> RuntimeResult<()> {
@@ -596,8 +603,13 @@ impl Vm {
                 Ok(())
             },
             Value::Function(ptr) => {
-                let Function { name, max_slots, start, upvalues, .. } = ptr.unwrap_ref();
+                let Function { name, max_slots, start, upvalues, is_async } = ptr.unwrap_ref();
                 let stack_start = self.stack.len() - args_len as usize;
+
+                if *is_async {
+                    self.stack.resize(stack_start + *max_slots as usize, Value::Null);
+                    return Ok(());
+                }
 
                 self.call_stack.push(CallFrame { 
                     ip: self.ip, 
@@ -954,7 +966,7 @@ impl Vm {
         ValuePtr::new_unchecked(self.allocate(TinyString::new(string.as_bytes())))
     }
 
-    pub fn get_resource<T: Resource>(&self, resource_id: u32) -> Option<Rc<T>> {
+    pub(crate) fn get_resource<T: Resource>(&self, resource_id: u32) -> Option<Rc<T>> {
         self.resource_table.get(&resource_id)
             .and_then(|rc| unsafe {
                 if rc.type_id() == TypeId::of::<T>() {
@@ -963,10 +975,10 @@ impl Vm {
             })
     }
 
-    pub fn get_io_resource(&self, resource_id: u32) -> Option<Rc<dyn IoResource>> {
+    pub(crate) fn get_io_resource(&self, resource_id: u32) -> Option<Rc<dyn IoResource>> {
         self.resource_table.get(&resource_id)
             .and_then(|rc| unsafe {
-                if rc.is_io() {
+                if rc.kind() == ResourceKind::Io {
                     Some((*(rc as *const Rc<_> as *const Rc<dyn IoResource>)).clone())
                 } else { None }
             })
@@ -1030,4 +1042,26 @@ impl Vm {
         self.next_gc = self.bytes_allocated * 2;
     }
 
+}
+
+// Basically will execute bytes until there is a return opcode asynchronously. Using a 
+// mutable reference to the vm and a seperate stack and ip
+pub struct VmAsyncExecution<'a> {
+    pub(crate) vm: &'a mut Vm,
+    pub(crate) stack: Vec<Value>,
+    pub(crate) ip: usize
+}
+
+impl<'a> VmAsyncExecution<'a> {
+    pub fn new(vm: &'a mut Vm, ip: usize) -> Self {
+        Self { stack: vm.stack.clone(), ip, vm }
+    }
+
+    pub async fn execute(&mut self) -> RuntimeResult<Value> {
+        Ok(Value::Null)
+    }
+
+    pub async fn handle_error(&mut self, error: RuntimeError) -> RuntimeResult<()> {
+        handle_error!(error, self, self.vm)
+    }
 }

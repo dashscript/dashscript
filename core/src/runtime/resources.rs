@@ -4,8 +4,15 @@ use std::io::{ErrorKind, Write, Read};
 
 pub type ResourceError<T = ()> = Result<T, ErrorKind>;
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum ResourceKind {
+    Io,
+    Child,
+    None
+}
+
 pub trait Resource: Any + 'static {
-    fn is_io(&self) -> bool { false }
+    fn kind(&self) -> ResourceKind;
     fn close(&self) -> ResourceError { 
         Ok(()) 
     }
@@ -31,6 +38,10 @@ pub struct ChildStdoutResource(pub Box<ChildStdout>);
 pub struct ChildStderrResource(pub Box<ChildStderr>);
 
 impl Resource for ChildResource {
+    fn kind(&self) -> ResourceKind {
+        ResourceKind::Child
+    }
+
     fn close(&self) -> ResourceError {
         match unwrap_ref_as_mut(self.0.as_ref()).kill() {
             Ok(_) => Ok(()),
@@ -40,20 +51,20 @@ impl Resource for ChildResource {
 }
 
 impl Resource for ChildStdinResource {
-    fn is_io(&self) -> bool {
-        true
+    fn kind(&self) -> ResourceKind {
+        ResourceKind::Io
     }
 }
 
 impl Resource for ChildStdoutResource {
-    fn is_io(&self) -> bool {
-        true
+    fn kind(&self) -> ResourceKind {
+        ResourceKind::Io
     }
 }
 
 impl Resource for ChildStderrResource {
-    fn is_io(&self) -> bool {
-        true
+    fn kind(&self) -> ResourceKind {
+        ResourceKind::Io
     }
 }
 
