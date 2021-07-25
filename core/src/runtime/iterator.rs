@@ -51,7 +51,7 @@ impl ValueIter {
         if self.index >= self.len {
             Value::Null
         } else {
-            unsafe { (*self.ptr.offset(self.index as isize)).clone() }
+            unsafe { *self.ptr.offset(self.index as isize) }
         }
     }
 
@@ -61,7 +61,7 @@ impl ValueIter {
         }
 
         self.index -= 1;
-        unsafe { Some((*self.ptr.offset(self.index as isize)).clone()) }
+        unsafe { Some(*self.ptr.offset(self.index as isize)) }
     }
 
     pub unsafe fn dealloc(self) {
@@ -69,8 +69,21 @@ impl ValueIter {
             panic!("Expected ptr to deallocate ValueIter. Maybe it was deallocated already");
         }
 
-        ptr::drop_in_place(self.ptr as *mut &[Value]);
         alloc::alloc::dealloc(self.ptr as _, Layout::array::<Value>(self.len).unwrap());
+    }
+
+    pub fn to_vec(&self) -> Vec<Value> {
+        let mut index = 0;
+        let mut items = Vec::new();
+
+        while index < self.len {
+            unsafe {
+                items.push(*self.ptr.offset(index as isize));
+                index += 1;
+            }
+        }
+
+        items
     }
 
 }
@@ -82,7 +95,7 @@ impl Iterator for ValueIter {
             return None;
         }
 
-        let value = unsafe { (*self.ptr.offset(self.index as isize)).clone() };
+        let value = unsafe { *self.ptr.offset(self.index as isize) };
         self.index += 1;
         Some(value)
     }

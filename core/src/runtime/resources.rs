@@ -1,6 +1,47 @@
-use std::any::{Any};
-use std::process::{Child, ChildStdin, ChildStdout, ChildStderr};
+use std::rc::Rc;
+use std::any::{Any, TypeId};
+use std::collections::BTreeMap;
 use std::io::{ErrorKind, Write, Read};
+use std::process::{Child, ChildStdin, ChildStdout, ChildStderr};
+
+#[derive(Default, Clone)]
+pub struct ResourceTable {
+    resource_table: BTreeMap<u32, Rc<dyn Resource>>,
+    next_rid: u32
+}
+
+impl ResourceTable {
+
+    pub fn get<T: Resource>(&self, resource_id: u32) -> Option<Rc<T>> {
+        self.resource_table.get(&resource_id)
+            .and_then(|rc| unsafe {
+                if rc.type_id() == TypeId::of::<T>() {
+                    Some((*(rc as *const Rc<_> as *const Rc<T>)).clone())
+                } else { None }
+            })
+    }
+
+    pub fn get_io(&self, resource_id: u32) -> Option<Rc<dyn IoResource>> {
+        self.resource_table.get(&resource_id)
+            .and_then(|rc| unsafe {
+                if rc.kind() == ResourceKind::Io {
+                    Some((*(rc as *const Rc<_> as *const Rc<dyn IoResource>)).clone())
+                } else { None }
+            })
+    }
+
+    pub fn add<T: Resource>(&mut self, resource: T) -> u32 {
+        let rid = self.next_rid;
+        assert!(self.resource_table.insert(self.next_rid, Rc::new(resource)).is_none());
+        self.next_rid += 1;
+        rid
+    }
+
+    pub fn remove(&mut self, rid: u32) -> Option<Rc<dyn Resource>> {
+        self.resource_table.remove(&rid)
+    }
+
+}
 
 pub type ResourceError<T = ()> = Result<T, ErrorKind>;
 
@@ -8,6 +49,7 @@ pub type ResourceError<T = ()> = Result<T, ErrorKind>;
 pub enum ResourceKind {
     Io,
     Child,
+    Bool,
     None
 }
 
@@ -37,6 +79,9 @@ pub struct ChildStdinResource(pub Box<ChildStdin>);
 pub struct ChildStdoutResource(pub Box<ChildStdout>);
 pub struct ChildStderrResource(pub Box<ChildStderr>);
 
+#[derive(Copy, Clone)]
+pub struct BoolResource(pub bool);
+
 impl Resource for ChildResource {
     fn kind(&self) -> ResourceKind {
         ResourceKind::Child
@@ -65,6 +110,17 @@ impl Resource for ChildStdoutResource {
 impl Resource for ChildStderrResource {
     fn kind(&self) -> ResourceKind {
         ResourceKind::Io
+    }
+}
+
+impl Resource for BoolResource {
+    fn close(&self) -> ResourceError {
+        unsafe { std::ptr::write(self as *const BoolResource as *mut bool, true) }
+        Ok(())
+    }
+
+    fn kind(&self) -> ResourceKind {
+        ResourceKind::Bool
     }
 }
 

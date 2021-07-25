@@ -202,6 +202,12 @@ impl From<String> for TinyString {
     }
 }
 
+impl From<&TinyString> for TinyString {
+    fn from(string: &TinyString) -> Self {
+        string.clone()
+    }
+}
+
 const CONT_MASK: u8 = 0b0011_1111;
 
 fn utf8_acc_cont_byte(ch: u32, byte: u8) -> u32 {

@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::string::ToString;
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
-use crate::{TinyString, Map, ValueIter, Vm, ValuePtr, Function, NativeFunction, Instance};
+use crate::{TinyString, Map, ValueIter, Vm, ValuePtr, Function, NativeFunction, Instance, Promise};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
@@ -19,6 +19,7 @@ pub enum Value {
     NativeFn(ValuePtr<NativeFunction>),
     Iterator(ValuePtr<ValueIter>),
     Instance(ValuePtr<Instance>),
+    Promise(ValuePtr<Promise>),
     Null // The basic null or empty value
 }
 
@@ -50,7 +51,8 @@ impl Value {
             Self::Array(_) => TinyString::new(b"[Array]"),
             Self::Function(_) | Self::NativeFn(_) => TinyString::new(b"[Function]"),
             Self::Iterator(_) => TinyString::new(b"[Iterator]"),
-            Self::Null => TinyString::new(b"null")
+            Self::Promise(_) => TinyString::new(b"[Promise]"),
+            Self::Null => TinyString::new(b"null"),
         }
     }
 
@@ -82,7 +84,8 @@ impl Value {
             Self::Array(_) => "[Array]".to_owned(),
             Self::Function(_) | Self::NativeFn(_) => "[Function]".to_owned(),
             Self::Iterator(_) => "[Iterator]".to_owned(),
-            Self::Null => "null".to_string()
+            Self::Promise(_) => "[Promise]".to_owned(),
+            Self::Null => "null".to_owned()
         }
     }
 
@@ -144,6 +147,7 @@ impl Value {
                 Self::Array(_) => b"array",
                 Self::Dict(_) | Self::Instance(_) => b"object",
                 Self::Iterator(_) => b"iterator",
+                Self::Promise(_) => b"promise",
                 Self::Function(_) | Self::NativeFn(_) => b"function"
             }
         )
@@ -195,6 +199,9 @@ impl Default for Value {
 impl Default for &Value {
     fn default() -> &'static Value { &Value::Null }
 }
+
+unsafe impl Send for Value {}
+unsafe impl Sync for Value {}
 
 impl ops::Not for Value {
     type Output = Self;
@@ -357,7 +364,8 @@ impl Hash for Value {
             Self::Function(ptr) => hash_ptr!(ptr),
             Self::NativeFn(ptr) => hash_ptr!(ptr),
             Self::Iterator(ptr) => hash_ptr!(ptr),
-            Self::Instance(ptr) => hash_ptr!(ptr)
+            Self::Instance(ptr) => hash_ptr!(ptr),
+            Self::Promise(ptr) => hash_ptr!(ptr)
         }
     }
 }
@@ -441,7 +449,29 @@ impl Display for Value {
                 write!(f, "}}")
             },
             Value::Function(_) | Value::NativeFn(_) => write!(f, "[Function]"),
-            Value::Iterator(_) => write!(f, "[Iterator]")
+            Value::Iterator(_) => write!(f, "[Iterator]"),
+            Value::Promise(promise) => write!(f, "[Promise<{}>]", promise.unwrap_str())
+        }
+    }
+}
+
+impl Into<TinyString> for Value {
+    fn into(self) -> TinyString {
+        self.to_tiny_string()
+    }
+}
+
+impl From<Option<Value>> for Value {
+    fn from(option: Option<Value>) -> Value {
+        option.unwrap_or(Value::Null)
+    }
+}
+
+impl From<Option<&Value>> for Value {
+    fn from(option: Option<&Value>) -> Value {
+        match option {
+            Some(value) => *value,
+            None => Value::Null
         }
     }
 }

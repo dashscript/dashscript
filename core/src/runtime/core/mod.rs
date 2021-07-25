@@ -35,10 +35,6 @@ pub fn init(vm: &mut Vm) {
         "Process" => init_process
     }
 
-    if vm.permissions.memory {
-        init_module! { "Memory" => init_memory }
-    }
-
     let window = window::init(vm);
     vm.add_global("window", window);
 
@@ -48,6 +44,8 @@ pub fn init(vm: &mut Vm) {
     methods::object::init(vm);
     methods::function::init(vm);
     methods::array::init(vm);
+    methods::promise::init(vm);
+    builtin::init_promise_handler(vm);
 
     macro_rules! native_fn {
         ($bytes:expr, $value:expr) => {{
@@ -114,12 +112,14 @@ pub fn init(vm: &mut Vm) {
         }
     });
 
-    native_fn!(b"isNaN", |_, args| Ok(Value::Bool(
-        match args.get(0) {
-            Some(value) => value.is_nan(),
-            None => false
-        }
-    )));
+    native_fn!(b"isNaN", |_, args| {
+        Ok(Value::Bool(
+            match args.get(0) {
+                Some(value) => value.is_nan(),
+                None => false
+            }
+        ))
+    });
 
     native_fn!(b"range", |vm, args| {
         let (start, end) = match args {

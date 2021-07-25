@@ -4,63 +4,63 @@ use crate::{Value, TinyString, Vm};
 #[derive(Clone, Debug)]
 pub struct RuntimeError {
     pub(crate) message: TinyString,
+    pub(super) catchable: bool,
+    pub(super) ip: usize,
     line: Option<u32>, 
-    trace: Option<Vec<TinyString>>,
-    pub(super) catchable: bool
+    trace: Option<Vec<TinyString>>
 }
 
 impl RuntimeError {
-    pub(crate) fn new<M: Into<TinyString>>(vm: &Vm, message: M) -> Self {
-        let position_ = vm.chunk.get_position(vm.ip);
-        let mut trace_ = Vec::new();
 
-        for frame in vm.call_stack.iter() {
-            trace_.push(frame.name());
-        }
-
-        Self {
-            message: message.into(),
-            line: Some(vm.chunk.get_line(position_)),
-            trace: Some(trace_),
-            catchable: true
-        }
-    }
-
-    pub(crate) fn new_uncatchable<M: Into<TinyString>>(vm: &Vm, message: M) -> Self {
-        let position_ = vm.chunk.get_position(vm.ip);
-        let mut trace_ = Vec::new();
-
-        for frame in vm.call_stack.iter() {
-            trace_.push(frame.name());
-        }
+    pub(crate) fn new<M>(vm: &Vm, message: M) -> Self
+    where
+        M: Into<TinyString>
+    {
+        let position_ = vm.chunk.get_position(vm.fiber.ip);
 
         Self {
             message: message.into(),
             line: Some(vm.chunk.get_line(position_)),
-            trace: Some(trace_),
-            catchable: false
+            trace: Some(vm.fiber.complete_trace()),
+            catchable: true,
+            ip: vm.fiber.ip
         }
     }
 
-    pub(crate) fn new_io(vm: &mut Vm, error: IoError) -> Self {
-        let position_ = vm.chunk.get_position(vm.ip);
-        let mut trace_ = Vec::new();
-
-        for frame in vm.call_stack.iter() {
-            trace_.push(frame.name());
-        }
+    pub(crate) fn new_with_ip<M>(vm: &Vm, message: M, ip: usize) -> Self
+    where
+        M: Into<TinyString>
+    {
+        let position_ = vm.chunk.get_position(ip);
 
         Self {
-            message: TinyString::from(io_error_to_string(error.kind())),
+            message: message.into(),
             line: Some(vm.chunk.get_line(position_)),
-            trace: Some(trace_),
-            catchable: true
+            trace: Some(vm.fiber.complete_trace()),
+            catchable: true,
+            ip
+        }
+    }
+
+    pub(crate) fn new_uncatchable<M>(vm: &Vm, message: M) -> Self
+    where
+        M: Into<TinyString>
+    {
+        let position_ = vm.chunk.get_position(vm.fiber.ip);
+
+        Self {
+            message: message.into(),
+            line: Some(vm.chunk.get_line(position_)),
+            trace: Some(vm.fiber.complete_trace()),
+            catchable: false,
+            ip: vm.fiber.ip
         }
     }
 
     pub(crate) fn to_value(self, vm: &mut Vm) -> Value {
         Value::String(vm.allocate_value_ptr(self.message))
     }
+
 }
 
 pub type RuntimeResult<T> = Result<T, RuntimeError>;
@@ -91,5 +91,11 @@ fn io_error_to_string<'a>(io_error_kind: IoErrorKind) -> &'a str {
 impl From<IoErrorKind> for TinyString {
     fn from(kind: IoErrorKind) -> Self {
         Self::from(io_error_to_string(kind))
+    }
+}
+
+impl From<IoError> for TinyString {
+    fn from(error: IoError) -> Self {
+        Self::from(io_error_to_string(error.kind()))
     }
 }

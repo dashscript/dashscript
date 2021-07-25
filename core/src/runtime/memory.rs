@@ -4,7 +4,7 @@ use alloc::alloc::Layout;
 use std::marker::PhantomData;
 use std::{ptr, mem};
 use std::fmt::{self, Debug, Formatter};
-use crate::{Value, Map, ValueIter, TinyString, Instance};
+use crate::{Value, Map, ValueIter, TinyString, Instance, Promise};
 use super::object::{self, ObjectKind};
 
 pub(crate) const USIZE_SIZE: usize = mem::size_of::<usize>();
@@ -28,6 +28,12 @@ pub fn create_layout<T>() -> Layout {
     let t_align = mem::align_of::<T>();
     let size = next_alignment(GcHeader::SIZE, t_align) + mem::size_of::<T>();
     Layout::from_size_align(size, if t_align >= GcHeader::ALIGN { t_align } else { GcHeader::ALIGN }).unwrap()
+}
+
+pub fn create_layout_with_size<T>() -> (Layout, usize) {
+    let t_align = mem::align_of::<T>();
+    let size = next_alignment(GcHeader::SIZE, t_align) + mem::size_of::<T>();
+    (Layout::from_size_align(size, if t_align >= GcHeader::ALIGN { t_align } else { GcHeader::ALIGN }).unwrap(), size)
 }
 
 pub fn create_gc_layout<T>() -> GcLayout {
@@ -91,13 +97,17 @@ macro_rules! deallocate {
     ($ptr:expr, ValueIter) => {{
         let offset = next_alignment(GcHeader::SIZE, mem::align_of::<ValueIter>());
         (*($ptr.add(offset) as *mut ValueIter)).dealloc();
-        alloc::alloc::dealloc($ptr as _, create_layout::<ValueIter>());
+        let (layout, size) = create_layout_with_size::<ValueIter>();
+        alloc::alloc::dealloc($ptr as _, layout);
+        size
     }};
 
     ($ptr:expr, $type:ty) => {{
         let offset = next_alignment(GcHeader::SIZE, mem::align_of::<$type>());
         ptr::drop_in_place($ptr.add(offset) as *mut $type);
-        alloc::alloc::dealloc($ptr as _, create_layout::<$type>());
+        let (layout, size) = create_layout_with_size::<$type>();
+        alloc::alloc::dealloc($ptr as _, layout);
+        size
     }};
 }
 
@@ -121,7 +131,7 @@ impl GcHandle {
     }
 
     // This might be unsafe if you deallocated the handler at the wrong time
-    pub unsafe fn dealloc(&self) {
+    pub unsafe fn dealloc(&self) -> usize {
         if self.0.is_null() {
             panic!("Ptr {} is null.", self.0 as usize);
         }
@@ -133,11 +143,12 @@ impl GcHandle {
             ObjectKind::Function => deallocate!(self.0, object::Function),
             ObjectKind::Iterator => deallocate!(self.0, ValueIter),
             ObjectKind::String => deallocate!(self.0, TinyString),
-            ObjectKind::Instance => deallocate!(self.0, object::Instance)
+            ObjectKind::Instance => deallocate!(self.0, object::Instance),
+            ObjectKind::Promise => deallocate!(self.0, object::Promise)
         }
     }
 
-    pub unsafe fn dealloc_if_unreachable(&self) -> bool {
+    pub unsafe fn dealloc_if_unreachable(&self) -> (bool, usize) {
         if self.0.is_null() {
             panic!("Ptr {} is null.", self.0 as usize);
         }
@@ -145,20 +156,21 @@ impl GcHandle {
         let pointer = self.0 as *const GcHeader;
 
         if !(*pointer).0 {
-            match self.1 {
+            let size = match self.1 {
                 ObjectKind::NativeFunction => deallocate!(self.0, object::NativeFunction),
                 ObjectKind::Array => deallocate!(self.0, Vec<Value>),
                 ObjectKind::Map => deallocate!(self.0, Map),
                 ObjectKind::Function => deallocate!(self.0, object::Function),
                 ObjectKind::Iterator => deallocate!(self.0, ValueIter),
                 ObjectKind::String => deallocate!(self.0, TinyString),
-                ObjectKind::Instance => deallocate!(self.0, object::Instance)
+                ObjectKind::Instance => deallocate!(self.0, object::Instance),
+                ObjectKind::Promise => deallocate!(self.0, object::Promise)
             };
 
-            true
+            (true, size)
         } else {
             ptr::write(pointer as *mut bool, false);
-            false
+            (false, 0)
         }
     }
 
@@ -213,6 +225,14 @@ impl<T> ValuePtr<T> {
         }
     }
 
+    pub fn mark(&self) {
+        unsafe { ptr::write(self.0 as *mut bool, true) }
+    }
+
+    pub fn marked(&self) -> bool {
+        unsafe { *(self.0 as *mut bool) }
+    }
+
 }
 
 impl ValuePtr<TinyString> {
@@ -250,6 +270,12 @@ impl ValuePtr<Vec<Value>> {
         for byte in bytes {
             array.push(Value::Int(*byte as _));
         }
+    }
+}
+
+impl ValuePtr<Promise> {
+    pub fn unwrap_str(&self) -> &str {
+        self.unwrap_ref().state.as_str()
     }
 }
 

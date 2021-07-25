@@ -14,6 +14,7 @@ pub fn init(vm: &mut Vm) -> Value {
 
     init_fs(&mut window);
     init_process(&mut window);
+    init_memory(&mut window);
 
     window.string_constant("version", "1.0.0-dev");
     window.string_constant("platform", env::consts::OS);
@@ -48,8 +49,8 @@ pub fn init(vm: &mut Vm) -> Value {
 
     window.native_fn("close", |vm, args| {
         match args.get(0) {
-            Some(Value::Int(rid)) => {
-                if let Some(resource) = vm.resource_table.remove(&(*rid as u32)) {
+            Some(rid) => {
+                if let Some(resource) = vm.resource_table.remove(rid.to_u32()) {
                     if let Err(kind) = resource.close() {
                         return Err(RuntimeError::new(vm, kind))
                     }
@@ -64,7 +65,7 @@ pub fn init(vm: &mut Vm) -> Value {
     window.native_fn("flush", |vm, args| {
         match args.get(0) {
             Some(Value::Int(rid)) => {
-                if let Some(resource) = vm.get_io_resource(*rid as u32) {
+                if let Some(resource) = vm.resource_table.get_io(*rid as u32) {
                     if let Err(kind) = resource.flush() {
                         return Err(RuntimeError::new(vm, kind))
                     }
@@ -79,7 +80,7 @@ pub fn init(vm: &mut Vm) -> Value {
     window.native_fn("write", |vm, args| {
         match args.get(0..2) {
             Some([Value::Int(rid), Value::Array(bytes)]) => {
-                if let Some(resource) = vm.get_io_resource(*rid as u32) {
+                if let Some(resource) = vm.resource_table.get_io(*rid as u32) {
                     match resource.write(&*bytes.unwrap_bytes()) {
                         Ok(n) => Ok(Value::Int(n as _)),
                         Err(kind) => Err(RuntimeError::new(vm, kind))
@@ -95,7 +96,7 @@ pub fn init(vm: &mut Vm) -> Value {
     window.native_fn("read", |vm, args| {
         match args.get(0..2) {
             Some([Value::Int(rid), Value::Array(bytes)]) => {
-                if let Some(resource) = vm.get_io_resource(*rid as u32) {
+                if let Some(resource) = vm.resource_table.get_io(*rid as u32) {
                     let mut buf = bytes.unwrap_bytes();
                     match resource.read(&mut buf) {
                         Ok(n) => {
@@ -200,7 +201,7 @@ pub fn init_fs<'a>(window: &mut MapBuilder<'a>) {
                         None => TinyString::new(&[])
                     }
                 },
-                Err(error) => return Err(RuntimeError::new_io(vm, error))
+                Err(error) => return Err(RuntimeError::new(vm, error))
             };
     
             Ok(Value::String(vm.allocate_value_ptr(exec_path)))
@@ -211,7 +212,7 @@ pub fn init_fs<'a>(window: &mut MapBuilder<'a>) {
                 Some(Value::String(file_path)) => {
                     match fs::read_to_string(file_path.unwrap_ref() as &str) {
                         Ok(string) => Ok(Value::String(vm.allocate_string(string))),
-                        Err(error) => Err(RuntimeError::new_io(vm, error))
+                        Err(error) => Err(RuntimeError::new(vm, error))
                     }
                 },
                 _ => Err(RuntimeError::new(vm, "[window.readTextFile]: Expected (string) parameters."))
@@ -225,7 +226,7 @@ pub fn init_fs<'a>(window: &mut MapBuilder<'a>) {
                 Some(Value::String(new_dir)) => {
                     match env::set_current_dir(new_dir.unwrap_ref() as &str) {
                         Ok(_) => Ok(Value::Null),
-                        Err(error) => Err(RuntimeError::new_io(vm, error))
+                        Err(error) => Err(RuntimeError::new(vm, error))
                     }
                 },
                 _ => Err(RuntimeError::new(vm, "[window.chdir]: Expected (string) parameters."))
@@ -237,7 +238,7 @@ pub fn init_fs<'a>(window: &mut MapBuilder<'a>) {
                 Some([Value::String(from), Value::String(to)]) => {
                     match std::fs::copy(from.unwrap_ref() as &str, to.unwrap_ref() as &str) {
                         Ok(_) => Ok(Value::Null),
-                        Err(error) => Err(RuntimeError::new_io(vm, error))
+                        Err(error) => Err(RuntimeError::new(vm, error))
                     }
                 },
                 _ => Err(RuntimeError::new(vm, "[window.copyFile]: Expected (string, string) parameters."))
@@ -249,7 +250,7 @@ pub fn init_fs<'a>(window: &mut MapBuilder<'a>) {
                 Some(Value::String(file_path)) => {
                     match File::create(file_path.unwrap_ref() as &str) {
                         Ok(_) => Ok(Value::Null),
-                        Err(error) => Err(RuntimeError::new_io(vm, error))
+                        Err(error) => Err(RuntimeError::new(vm, error))
                     }
                 },
                 _ => Err(RuntimeError::new(vm, "[window.createFile]: Expected (string) parameters."))
@@ -267,7 +268,7 @@ pub fn init_process<'a>(window: &mut MapBuilder<'a>) {
         let mut command = resolve_run_args(vm, args)?;
         let mut child = match command.spawn() {
             Ok(child) => child,
-            Err(error) => return Err(RuntimeError::new_io(vm, error))
+            Err(error) => return Err(RuntimeError::new(vm, error))
         };
 
         let pid = child.id();
@@ -275,7 +276,7 @@ pub fn init_process<'a>(window: &mut MapBuilder<'a>) {
         macro_rules! define_stdio_rid {
             ($($var:ident $key:ident => $type:tt)+) => {
                 $(let $var = match child.$key.take() {
-                    Some($var) => Some(vm.add_resource($type(Box::new($var)))),
+                    Some($var) => Some(vm.resource_table.add($type(Box::new($var)))),
                     None => None
                 };)+
             };
@@ -287,8 +288,20 @@ pub fn init_process<'a>(window: &mut MapBuilder<'a>) {
             stderr_rid stderr => ChildStderrResource
         }
 
-        let rid = vm.add_resource(ChildResource(Box::new(child)));
+        let rid = vm.resource_table.add(ChildResource(Box::new(child)));
         Ok(initiate_process_instance(vm, rid, pid, stdout_rid, stdin_rid, stderr_rid))
+    });
+}
+
+pub fn init_memory<'a>(window: &mut MapBuilder<'a>) {
+    if !window.vm.permissions.memory {
+        return;
+    }
+
+    window.native_fn("collectGarbage", |vm, _| {
+        let initial = vm.bytes_allocated;
+        vm.collect_garbage();
+        Ok(Value::Int((initial - vm.bytes_allocated) as isize))
     });
 }
 

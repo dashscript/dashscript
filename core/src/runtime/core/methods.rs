@@ -478,7 +478,7 @@ pub mod array {
                 };
                 
                 for item in array.iter() {
-                    vm.stack.extend_from_slice(&[*item, Value::Int(index)]);
+                    vm.fiber.stack.extend_from_slice(&[*item, Value::Int(index)]);
                     if let Err(error) = vm.call_function_with_returned_value(function, 2) {
                         return Err(error);
                     }
@@ -497,7 +497,7 @@ pub mod array {
                 };
 
                 for &item in array.iter() {
-                    vm.stack.extend_from_slice(&[item, Value::Int(index)]);
+                    vm.fiber.stack.extend_from_slice(&[item, Value::Int(index)]);
                     match vm.call_function_with_returned_value(function, 2) {
                         Ok(value) => values.push(value),
                         Err(error) => return Err(error)
@@ -516,7 +516,7 @@ pub mod array {
                 };
                 
                 for &item in array.iter() {
-                    vm.stack.extend_from_slice(&[item, Value::Int(index)]);
+                    vm.fiber.stack.extend_from_slice(&[item, Value::Int(index)]);
                     match vm.call_function_with_returned_value(function, 2) {
                         Ok(value) => {
                             if value.to_bool() {
@@ -539,7 +539,7 @@ pub mod array {
                 };
                 
                 for &item in array.iter() {
-                    vm.stack.extend_from_slice(&[item, Value::Int(index)]);
+                    vm.fiber.stack.extend_from_slice(&[item, Value::Int(index)]);
                     match vm.call_function_with_returned_value(function, 2) {
                         Ok(value) => {
                             if value.to_bool() {
@@ -635,7 +635,7 @@ pub mod array {
                 };
                 
                 for &item in array.iter() {
-                    vm.stack.extend_from_slice(&[item, Value::Int(index)]);
+                    vm.fiber.stack.extend_from_slice(&[item, Value::Int(index)]);
                     match vm.call_function_with_returned_value(function, 2) {
                         Ok(value) => result.push(value),
                         Err(error) => return Err(error)
@@ -729,6 +729,103 @@ pub mod array {
 
         let array = Value::Dict(array_object.allocate_value_ptr());
         vm.add_global("Array", array);
+    }
+
+}
+
+pub mod promise {
+
+    use crate::{Vm, Value, TinyString, RuntimeError, PromiseState, Promise, ValuePtr};
+    use crate::runtime::core::map_builder::MapBuilder;
+    use crate::runtime::core::builtin::initiate_promise_handler_instance;
+
+    fn ptr_as_promise(ptr: *const u8) -> Value {
+        Value::Promise(ValuePtr::new_unchecked(ptr))
+    }
+
+    pub fn init(vm: &mut Vm) {
+        methods!(vm.promise_methods, {
+            "clone" => |vm, promise, _,  _| Ok(Value::Promise(vm.allocate_value_ptr(promise.clone()))),
+            "state" => |vm, promise, _, _| Ok(Value::String(vm.allocate_static_str(promise.state.as_str()))),
+            "then" => |vm, promise, ptr, args| {
+                match args.get(0) {
+                    Some(&function) if function.is_function() => {
+                        match promise.state {
+                            PromiseState::Fulfilled(value) => {
+                                vm.fiber.stack.push(value);
+                                vm.call_function_with_returned_value(function, 1)
+                                    .and(Ok(ptr_as_promise(ptr)))
+                            },
+                            PromiseState::Pending => {
+                                promise.then = Some(function);
+                                Ok(ptr_as_promise(ptr))
+                            },
+                            PromiseState::Rejected(value) => Err(RuntimeError::new(vm, format!("[PromiseRejected]: {}.", value)))
+                        }
+                    },
+                    _ => Err(RuntimeError::new(vm, "[Promise.then]: Expected (function) arguments."))
+                }
+            },
+            "catch" => |vm, promise, ptr, args| {
+                match args.get(0) {
+                    Some(&function) if function.is_function() => {
+                        match promise.state {
+                            PromiseState::Pending => {
+                                promise.catch = Some(function);
+                                Ok(ptr_as_promise(ptr))
+                            },
+                            PromiseState::Rejected(value) => {
+                                vm.fiber.stack.push(value);
+                                vm.call_function_with_returned_value(function, 1)
+                                    .and(Ok(ptr_as_promise(ptr)))
+                            },
+                            _ => Ok(Value::Null)
+                        }
+                    },
+                    _ => Err(RuntimeError::new(vm, "[Promise.then]: Expected (function) arguments."))
+                }
+            },
+            "finally" => |vm, promise, ptr, args| {
+                match args.get(0) {
+                    Some(&function) if function.is_function() => {
+                        match promise.state {
+                            PromiseState::Pending => {
+                                promise.catch = Some(function);
+                                promise.then = Some(function);
+                                Ok(ptr_as_promise(ptr))
+                            },
+                            PromiseState::Rejected(value) | PromiseState::Fulfilled(value) => {
+                                vm.fiber.stack.push(value);
+                                vm.call_function_with_returned_value(function, 1)
+                                    .and(Ok(ptr_as_promise(ptr)))
+                            }
+                        }
+                    },
+                    _ => Err(RuntimeError::new(vm, "[Promise.then]: Expected (function) arguments."))
+                }
+            },
+        });
+
+        let mut promise_object = MapBuilder::new(vm);
+
+        promise_object.native_fn("new", |vm, args| {
+            match args.get(0) {
+                Some(&function) if function.is_function() => {
+                    let promise = Value::Promise(vm.allocate_value_ptr(Promise::new()));
+                    let handler = initiate_promise_handler_instance(vm, promise);
+                    vm.fiber.stack.push(handler);
+
+                    match vm.call_function_with_returned_value(function, 1) {
+                        Ok(_) => Ok(promise),
+                        Err(error) => Err(error)
+                    }
+                },
+                _ => Err(RuntimeError::new(vm, "[Promise.new]: Expected (function) arguments."))
+            }
+        });
+
+        let promise = Value::Dict(promise_object.allocate_value_ptr());
+        vm.add_global("Promise", promise);
     }
 
 }

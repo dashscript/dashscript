@@ -35,7 +35,7 @@ pub fn run(cli: &mut Cli) {
         Err(errors) => Cli::log_errors(errors)
     };
 
-    match Vm::new(compiler.into(), cli.flags.clone(), pathbuf) {
+    match Vm::new(compiler.into(), cli.flags.clone(), pathbuf, None) {
         Ok(_) => (),
         Err(e) => println!("{:?}", e)
     };

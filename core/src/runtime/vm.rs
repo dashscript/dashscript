@@ -1,23 +1,21 @@
 extern crate alloc;
 
-use std::rc::Rc;
-use std::{mem, ptr};
-use std::any::TypeId;
+use std::{ptr};
 use std::path::PathBuf;
 use std::convert::TryInto;
-use std::collections::{HashMap, BTreeMap};
+use std::collections::HashMap;
 use super::memory::*;
 use crate::{
     Value, RuntimeResult, RuntimeError, ObjectTrait, Chunk, TinyString, Function, Upvalue, 
-    UpvalueState, ValueIter, ValuePtr, Instance, Map, Resource, IoResource, ResourceKind,
-    opcode, core
+    UpvalueState, ValueIter, ValuePtr, Instance, Map, Fiber, Promise, PromiseState, 
+    ResourceTable, opcode, core
 };
 
 macro_rules! read_u8 {
     ($self:expr) => {
-        match $self.chunk.bytes.get($self.ip) {
+        match $self.chunk.bytes.get($self.fiber.ip) {
             Some(byte) => {
-                $self.ip += 1;
+                $self.fiber.ip += 1;
                 *byte
             },
             None => return Err(RuntimeError::new_uncatchable($self, "[BytecodeReader]: Corrupted Bytecode. Expected 1 more byte to form u8."))
@@ -27,9 +25,9 @@ macro_rules! read_u8 {
 
 macro_rules! read_u16 {
     ($self:expr) => {
-        match $self.chunk.bytes.get($self.ip..$self.ip + 2) {
+        match $self.chunk.bytes.get($self.fiber.ip..$self.fiber.ip + 2) {
             Some(byte) => {
-                $self.ip += 2;
+                $self.fiber.ip += 2;
                 u16::from_le_bytes(byte.try_into().unwrap())
             },
             None => return Err(RuntimeError::new_uncatchable($self, "[BytecodeReader]: Corrupted Bytecode. Expected 2 more bytes to form u16."))
@@ -39,9 +37,9 @@ macro_rules! read_u16 {
 
 macro_rules! read_u32 {
     ($self:expr) => {
-        match $self.chunk.bytes.get($self.ip..$self.ip + 4) {
+        match $self.chunk.bytes.get($self.fiber.ip..$self.fiber.ip + 4) {
             Some(byte) => {
-                $self.ip += 4;
+                $self.fiber.ip += 4;
                 u32::from_le_bytes(byte.try_into().unwrap())
             },
             None => return Err(RuntimeError::new_uncatchable($self, "[BytecodeReader]: Corrupted Bytecode. Expected 4 more bytes to form u32."))
@@ -51,68 +49,45 @@ macro_rules! read_u32 {
 
 macro_rules! read_auto {
     ($self:expr) => {
-        match $self.chunk.bytes[$self.ip] {
+        match $self.chunk.bytes[$self.fiber.ip] {
             0 => {
-                $self.ip += 1;
-                match $self.chunk.bytes.get($self.ip) {
-                    Some(byte) => {
-                        $self.ip += 1;
-                        *byte as u32
-                    },
-                    None => return Err(RuntimeError::new_uncatchable($self, "[BytecodeReader]: Corrupted Bytecode. Expected 1 more byte to form u8."))
-                }
+                $self.fiber.ip += 1;
+                read_u8!($self) as u32
             },
             1 => {
-                $self.ip += 1;
-                match $self.chunk.bytes.get($self.ip..$self.ip + 4) {
-                    Some(byte) => {
-                        $self.ip += 4;
-                        u32::from_le_bytes(byte.try_into().unwrap())
-                    },
-                    None => return Err(RuntimeError::new_uncatchable($self, "[BytecodeReader]: Corrupted Bytecode. Expected 4 more bytes to form u32."))
-                }
+                $self.fiber.ip += 1;
+                read_u32!($self)
             },
             _ => return Err(RuntimeError::new_uncatchable($self, "[BytecodeReader]: Corrupted Bytecode. Expected 1 more byte as either 1[LONG] or 0[SHORT]."))
         }
     };
 }
 
-macro_rules! pop_two {
-    ($self:expr) => {
-        match ($self.stack.pop(), $self.stack.pop()) {
-            (Some(rhs), Some(lhs)) => (lhs, rhs),
-            _ => return Err(RuntimeError::new_uncatchable($self, "[VM]: Stack Manipulation Failed. Expected stack length with minimum size as 2 to pop two elements."))
-        }
-    };
+macro_rules! read_string {
+    ($self:expr, $index:expr) => {{
+        let bytes = match $self.chunk.constants.strings.get($index as usize) {
+            Some(string) => string.as_bytes(),
+            None => &[]
+        };
+
+        #[allow(mutable_borrow_reservation_conflict)]
+        let constant = $self.allocate_value_ptr(TinyString::new(bytes));
+        $self.push(Value::String(constant));
+    }};
 }
 
-macro_rules! handle_error {
-    ($error:expr, $self:expr, $vm:expr) => {
-        if $error.catchable {
-            let mut block = None;
-            for &try_block in &$vm.chunk.try_blocks {
-                if try_block.0 < $self.ip {
-                    block = Some(try_block);
-                }
-            }
-
-            match block {
-                Some((_, jump_at, slot)) => {
-                    let value = $error.to_value($vm);
-                    $self.ip = jump_at;
-                    $vm.add_local(slot as usize, value);
-                    Ok(())
-                },
-                None => return Err($error)
-            }
-        } else {
-            Err($error)
+macro_rules! pop_two {
+    ($self:expr) => {
+        match $self.fiber.pop_two() {
+            Some(popped) => popped,
+            _ => return Err(RuntimeError::new_uncatchable($self, "[VM]: Stack Manipulation Failed. Expected stack length with minimum size as 2 to pop two elements."))
         }
     };
 }
 
 pub type MethodFn<T> = fn (&mut Vm, &mut T, *const u8, &[Value]) -> RuntimeResult<Value>;
 pub type MethodMap<T> = HashMap<TinyString, MethodFn<T>>;
+type Flags = HashMap<TinyString, TinyString>;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Permissions {
@@ -123,28 +98,14 @@ pub struct Permissions {
     pub unsafe_libs: bool
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct CallFrame {
-    name: TinyString,
-    upvalues: Vec<Upvalue>,
-    stack_start: usize,
-    max_slots: u8,
-    ip: usize // This would be 0 if the call frame belongs to a native function
-}
-
-impl CallFrame {
-    pub fn name(&self) -> TinyString {
-        self.name.clone()
-    }
-}
-
 #[derive(Default)]
-pub struct VmConstants {
+pub struct Constants {
     init: Value,
     pub(super) prototype: Value,
     pub(super) __listeners: Value,
     pub(super) __time: Value,
     pub(super) __date: Value,
+    pub(super) __promise: Value,
     pub(super) rid: Value,
     pub(super) pid: Value,
     pub(super) stdin: Value,
@@ -153,87 +114,110 @@ pub struct VmConstants {
     pub(super) cwd: Value,
     pub(super) cmd: Value,
     pub(super) env: Value,
-    pub(super) process_prototype: ValuePtr<Map>
+    pub(super) process_prototype: ValuePtr<Map>,
+    pub(super) promise_handler_prototype: ValuePtr<Map>
 }
 
-#[derive(Default)]
 pub struct Vm {
     pub(crate) chunk: Chunk,
-    pub(crate) ip: usize,
-    pub(crate) stack: Vec<Value>,
-    pub(crate) globals: HashMap<u32, (Value, bool)>,
-    pub(crate) bytes_allocated: usize,
     pub(crate) permissions: Permissions,
+    pub(crate) bytes_allocated: usize,
     pub(crate) next_gc: usize,
     pub(crate) objects: Vec<GcHandle>,
     pub(crate) path: PathBuf,
-    pub(crate) iterator_methods: MethodMap<ValueIter>,
-    pub(crate) string_methods: MethodMap<TinyString>,
-    pub(crate) array_methods: MethodMap<Vec<Value>>,
-    pub(super) call_stack: Vec<CallFrame>,
-    pub(super) constants: VmConstants,
-    pub(super) resource_table: BTreeMap<u32, Rc<dyn Resource>>,
-    next_rid: u32,
-    flags: HashMap<TinyString, TinyString>,
+    pub(crate) fiber: Fiber,
+    pub(crate) constants: Constants,
+    pub iterator_methods: MethodMap<ValueIter>,
+    pub string_methods: MethodMap<TinyString>,
+    pub array_methods: MethodMap<Vec<Value>>,
+    pub promise_methods: MethodMap<Promise>,
+    pub globals: HashMap<u32, (Value, bool)>,
+    pub resource_table: ResourceTable,
+    flags: Flags,
     open_upvalues: Vec<Upvalue>
 }
 
 impl Vm {
 
-    // The pointer of null in pointers of vm by default
-    pub const NULL_POINTER: u32 = 0;
+    pub fn new(
+        chunk: Chunk, 
+        flags: Flags, 
+        path: PathBuf,
+        permissions: Option<Permissions>
+    ) -> RuntimeResult<Self> {
+        let permissions = match permissions {
+            Some(permissions) => permissions,
+            None => permission_from_flags(&flags)
+        };
 
-    pub fn new(chunk: Chunk, flags: HashMap<TinyString, TinyString>, path: PathBuf) -> RuntimeResult<Self> {
         let mut vm = Self {
+            fiber: Fiber::new("runtime", chunk.bytes[0], 1),
             chunk,
             flags,
             path,
-            call_stack: vec![CallFrame { name: TinyString::new(b"runtime"), ..Default::default() }],
+            permissions,
+            array_methods: MethodMap::new(),
+            string_methods: MethodMap::new(),
+            promise_methods: MethodMap::new(),
+            iterator_methods: MethodMap::new(),
+            constants: Constants::default(),
+            globals: HashMap::new(),
+            open_upvalues: Vec::new(),
+            resource_table: ResourceTable::default(),
             next_gc: u16::MAX as usize,
-            ..Default::default()
+            bytes_allocated: 0,
+            objects: Vec::new(),
         };
 
-        macro_rules! vm_constants {
+        macro_rules! constants {
             ($($name:ident)+) => {
-                VmConstants {
+                Constants {
                     $($name: Value::String(vm.allocate_static_str(stringify!($name))),)+
-                    process_prototype: ValuePtr::default()
+                    process_prototype: ValuePtr::default(),
+                    promise_handler_prototype: ValuePtr::default()
                 }
             };
         }
 
-        vm.constants = vm_constants! { 
+        vm.constants = constants! { 
             init prototype rid pid stdin stdout stderr cwd cmd env
-            __listeners __time __date 
+            __listeners __time __date __promise
         };
 
-        vm.init_permissions();
         core::init(&mut vm);
+
         vm.execute()?;
         
         Ok(vm)
     }
 
-    pub fn init_permissions(&mut self) {
-        self.permissions = Permissions {
-            read: self.has_permission("read"),
-            write: self.has_permission("write"),
-            memory: self.has_permission("memory"),
-            child_process: self.has_permission("child-process"),
-            unsafe_libs: self.flags.contains_key(&TinyString::new(b"unsafe"))
-        };
-    }
-
     pub fn handle_error(&mut self, error: RuntimeError) -> RuntimeResult<()> {
-        handle_error!(error, self, self)
+        if error.catchable {
+            let mut block = None;
+
+            for &try_block in &self.chunk.try_blocks {
+                if try_block.0 < error.ip {
+                    block = Some(try_block);
+                }
+            }
+
+            match block {
+                Some((_, jump_at, slot)) => {
+                    let value = error.to_value(self);
+                    self.fiber.ip = jump_at;
+                    self.fiber.set_slot(slot, value);
+                    Ok(())
+                },
+                None => return Err(error)
+            }
+        } else {
+            Err(error)
+        }
     }
 
     pub fn execute(&mut self) -> RuntimeResult<()> {
-        self.stack.resize_with(self.chunk.bytes[self.ip] as usize, Default::default);
-        self.ip += 1;
-
-        while self.ip < self.chunk.bytes.len() {
-            match self.execute_byte(self.chunk.bytes[self.ip]) {
+        while self.fiber.ip < self.chunk.bytes.len() {
+            match self.execute_byte(self.chunk.bytes[self.fiber.ip]) {
                 Ok(_) => (),
                 Err(error) => self.handle_error(error)?
             }
@@ -244,121 +228,103 @@ impl Vm {
 
     pub fn execute_byte(&mut self, byte: u8) -> RuntimeResult<()> {
         use opcode::*;
-        self.ip += 1;
+
+        // Increment the ip whenever executing the byte
+        self.fiber.ip += 1;
 
         match byte {
-            TRUE => self.stack.push(Value::Bool(true)),
-            FALSE => self.stack.push(Value::Bool(false)),
-            NULL => self.stack.push(Value::Null),
-            STRING => {
-                let bytes = match self.chunk.constants.strings.get(read_u8!(self) as usize) {
-                    Some(string) => string.as_bytes(),
-                    None => &[]
-                };
-
-                #[allow(mutable_borrow_reservation_conflict)]
-                let constant = self.allocate_value_ptr(TinyString::new(bytes));
-                self.stack.push(Value::String(constant));
-            },
-            STRING_LONG => {
-                let bytes = match self.chunk.constants.strings.get(read_u32!(self) as usize) {
-                    Some(string) => string.as_bytes(),
-                    None => &[]
-                };
-        
-                #[allow(mutable_borrow_reservation_conflict)]
-                let constant = self.allocate_value_ptr(TinyString::new(bytes));
-                self.stack.push(Value::String(constant));
-            },
+            TRUE => self.push(Value::Bool(true)),
+            FALSE => self.push(Value::Bool(false)),
+            NULL => self.push(Value::Null),
+            STRING => read_string!(self, read_u8!(self)),
+            STRING_LONG => read_string!(self, read_u32!(self)),
             INT => {
                 let constant = self.chunk.constants.ints[read_u8!(self) as usize];
-                self.stack.push(Value::Int(constant))
+                self.push(Value::Int(constant))
             },
             INT_LONG => {
                 let constant = self.chunk.constants.ints[read_u32!(self) as usize];
-                self.stack.push(Value::Int(constant))
+                self.push(Value::Int(constant))
             },
             FLOAT => {
                 let constant = self.chunk.constants.floats[read_u8!(self) as usize];
-                self.stack.push(Value::Float(constant))
+                self.push(Value::Float(constant))
             },
             FLOAT_LONG => {
                 let constant = self.chunk.constants.floats[read_u32!(self) as usize];
-                self.stack.push(Value::Float(constant))
+                self.push(Value::Float(constant))
             },
             POP => {
-                self.stack.pop();
+                self.fiber.stack.pop();
             },
             ADD => {
                 let (lhs, rhs) = pop_two!(self);
                 let value = lhs.add(self, rhs);
-                self.stack.push(value);
+                self.push(value);
             },
             SUB => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(lhs - rhs);
+                self.push(lhs - rhs);
             },
             MUL => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(lhs * rhs);
+                self.push(lhs * rhs);
             },
             DIV => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(lhs / rhs);
+                self.push(lhs / rhs);
             },
             REM => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(lhs % rhs);
+                self.push(lhs % rhs);
             },
             SET_LOCAL => {
                 let slot = read_u8!(self);
-                let value = self.stack.pop().unwrap_or_default();
-                self.add_local(slot as usize, value);
+                let value = self.fiber.pop();
+                self.fiber.set_slot(slot, value);
             },
             SET_GLOBAL => {
                 let id = read_auto!(self);
-                self.globals.insert(id, (self.stack.pop().unwrap_or_default(), false));
+                let value = self.fiber.pop();
+                self.globals.insert(id, (value, false));
             },
             SET_UPVALUE => {
-                let upval = read_u8!(self);
-                let value = self.stack.pop().unwrap();
-                let frame = self.call_stack.last_mut().unwrap();
-                frame.upvalues[upval as usize].close(value);
+                let index = read_u8!(self);
+                let value = self.fiber.pop();
+                self.fiber.set_upslot(index as usize, value);
             },
             SET_ATTR => {
-                return match (self.stack.pop(), self.stack.pop(), self.stack.pop()) {
-                    (Some(a), Some(b), Some(c)) => self.set_attr(b, a, c, false),
-                    _ => return Err(RuntimeError::new_uncatchable(self, "[VM]: Stack Manipulation Failed. Expected stack length with minimum size as 3."))
+                return match self.fiber.pop_three() {
+                    Some((a, b, c)) => self.set_attr(a, b, c, false),
+                    _ => Err(RuntimeError::new_uncatchable(self, "[VM]: Stack Manipulation Failed. Expected stack length with minimum size as 3."))
                 }
             },
             GET_LOCAL => {
-                let frame = self.call_stack.last().unwrap();
-                let local = self.stack[frame.stack_start + read_u8!(self) as usize];
-                self.stack.push(local);
+                let index = read_u8!(self);
+                let value = self.fiber.slot(index);
+                self.push(value);
             },
             GET_UPVALUE => {
-                let slot = read_u8!(self);
-                let value = match self.call_stack.last().unwrap().upvalues[slot as usize].state() {
-                    UpvalueState::Closed(value) => value,
-                    UpvalueState::Open(index) => self.stack[index]
-                };
-
-                self.stack.push(value)
+                let index = read_u8!(self);
+                let value = self.fiber.upvalue(index);
+                self.push(value);
             },
             GET_GLOBAL => {
-                match self.globals.get(&read_auto!(self)) {
-                    Some((global, _)) => self.stack.push(*global),
-                    None => self.stack.push(Value::Null)
-                }
+                let value = match self.globals.get(&read_auto!(self)) {
+                    Some(x) => x.0,
+                    None => Value::Null
+                };
+
+                self.push(value);
             },
             GET_ATTR => {
                 let (target, attr) = pop_two!(self);
                 let result = self.resolve_attr(target, attr);
-                self.stack.push(result);
+                self.push(result);
             },
             CLOSE_UPVALUE => {
-                let closed_index = self.stack.len() - 1;
-                let closed = self.stack.pop().unwrap();
+                let closed_index = self.fiber.stack.len() - 1;
+                let closed = self.fiber.pop();
                 let mut retain = self.open_upvalues.len();
 
                 for upvalue in self.open_upvalues.iter().rev() {
@@ -374,66 +340,69 @@ impl Vm {
                 self.open_upvalues.truncate(retain);
             },
             ITER => {
-                let value = self.stack.pop().unwrap();
-                let ptr = self.allocate_value_ptr(value.into_iter());
-                self.stack.push(Value::Iterator(ptr))
+                let iter = self.fiber.pop().into_iter();
+                let ptr = self.allocate_value_ptr(iter);
+                self.push(Value::Iterator(ptr))
             },
             ITER_NEXT => {
                 let slot = read_u8!(self);
                 let jump_index = read_u16!(self);
 
-                match self.stack.last().unwrap().iter_next() {
-                    Some(value) => self.stack[self.call_stack.last().unwrap().stack_start + slot as usize] = value,
-                    None => self.ip += jump_index as usize
+                match self.fiber.last().unwrap().iter_next() {
+                    Some(value) => self.fiber.set_slot(slot, value),
+                    None => {
+                        self.fiber.set_slot(slot, Value::Null);
+                        self.fiber.ip += jump_index as usize;
+                    }
                 }
             },
             EQ => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(Value::Bool(lhs == rhs));
+                self.push(Value::Bool(lhs == rhs));
             },
             NEQ => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(Value::Bool(lhs != rhs));
+                self.push(Value::Bool(lhs != rhs));
             },
             GT => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(Value::Bool(lhs > rhs));
+                self.push(Value::Bool(lhs > rhs));
             },
             LT => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(Value::Bool(lhs < rhs));
+                self.push(Value::Bool(lhs < rhs));
             },
             GTE => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(Value::Bool(lhs >= rhs));
+                self.push(Value::Bool(lhs >= rhs));
             },
             LTE => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(Value::Bool(lhs <= rhs));
+                self.push(Value::Bool(lhs <= rhs));
             },
             JUMP => {
-                self.ip += read_u16!(self) as usize
+                self.fiber.ip += read_u16!(self) as usize
             },
             JUMP_BACK => {
-                self.ip -= read_u16!(self) as usize - 2;
+                self.fiber.ip -= read_u16!(self) as usize - 2;
             },
             JUMP_IF => {
-                if self.stack.last().unwrap_or_default().to_bool() {
-                    self.ip += read_u16!(self) as usize;
+                if self.fiber.pop().to_bool() {
+                    self.fiber.ip += read_u16!(self) as usize;
                 } else {
-                    self.ip += 2;
+                    self.fiber.ip += 2;
                 }
             },
             JUMP_NOT_IF => {
-                if !self.stack.pop().unwrap_or_default().to_bool() {
-                    self.ip += read_u16!(self) as usize;
+                if !self.fiber.pop().to_bool() {
+                    self.fiber.ip += read_u16!(self) as usize;
                 } else {
-                    self.ip += 2;
+                    self.fiber.ip += 2;
                 }
             },
             CALL => {
                 let args_len = read_u8!(self);
-                let target = self.stack.pop().unwrap();
+                let target = self.fiber.pop();
                 return self.call_function(target, args_len);
             },
             CALL_CHILD => {
@@ -442,59 +411,56 @@ impl Vm {
                 return self.call_inst_function(parent, attr, args_len);
             },
             ARRAY => {
-                let array_len = read_auto!(self) as usize;
-                let len = self.stack.len();
-                let offset_ip = len - array_len;
+                let count = read_auto!(self) as usize;
 
-                if self.stack.len() >= array_len {
-                    let array = self.stack[offset_ip..].to_vec();
-                    self.stack.truncate(offset_ip);
-
+                if self.fiber.stack.len() >= count {
+                    let array = self.fiber.drain(count);
                     let ptr = self.allocate_value_ptr(array);
-                    self.stack.push(Value::Array(ptr));
+                    self.push(Value::Array(ptr));
                 } else {
-                    return Err(RuntimeError::new(self, format!("[VM]: Stack Manipulation Failed. Expected stack length with minimum size as {}", array_len)))
+                    return Err(RuntimeError::new(self, format!("[VM]: Stack Manipulation Failed. Expected stack length with minimum size as {}", count)))
                 }
             },
             DICT => {
-                let actual_len = read_auto!(self) as usize;
-                let entries_len = actual_len * 2;
-                let len = self.stack.len();
-                let offset_ip = len - entries_len;
+                let count = read_auto!(self) as usize;
+                let length = self.fiber.stack.len();
+                let actual_count = count * 2;
 
-                if self.stack.len() >= entries_len {
+                if length >= actual_count {
                     let mut entries = HashMap::new();
 
-                    for _ in 0..actual_len {
-                        let value = self.stack.pop().unwrap();
-                        entries.insert(self.stack.pop().unwrap(), (value, false));
+                    for _ in 0..actual_count {
+                        let value = self.fiber.pop();
+                        entries.insert(self.fiber.pop(), (value, false));
                     }
 
-                    self.stack.truncate(offset_ip);
+                    self.fiber.stack.truncate(length - actual_count);
                     let ptr = self.allocate_value_ptr(entries);
-                    self.stack.push(Value::Dict(ptr));
+                    self.push(Value::Dict(ptr));
                 } else {
-                    return Err(RuntimeError::new(self, format!("[VM]: Stack Manipulation Failed. Expected stack length with minimum size as {}", entries_len)))
+                    return Err(RuntimeError::new(self, format!("[VM]: Stack Manipulation Failed. Expected stack length with minimum size as {}", actual_count)))
                 }
             },
             FUNC => {
-                let start = self.ip + 2;
-                self.ip += read_u16!(self) as usize;
+                let start = self.fiber.ip + 2;
+                self.fiber.ip += read_u16!(self) as usize;
                 
-                let (max_slots, upvalue_len, is_async) = match self.chunk.bytes.get(self.ip..self.ip + 3) {
+                let (max_slots, upvalue_len) = match self.chunk.bytes.get(self.fiber.ip..self.fiber.ip + 2) {
                     Some(bytes) => {
-                        self.ip += 3;
-                        (bytes[0], bytes[1], bytes[2] != 0)
+                        self.fiber.ip += 2;
+                        (bytes[0], bytes[1])
                     },
-                    None => return Err(RuntimeError::new_uncatchable(self, "[BytecodeReader]: Corrupted Bytecode. Expected 2 more bytes to get [MAX_SLOTS, UPVALUES_COUNT, IS_ASYNC[bool]]."))
+                    None => return Err(RuntimeError::new_uncatchable(self, "[BytecodeReader]: Corrupted Bytecode. Expected 2 more bytes to get [MAX_SLOTS, UPVALUES_COUNT]."))
                 };
 
                 let mut upvalues = Vec::with_capacity(upvalue_len as usize);
-                let current_frame = self.call_stack.last().unwrap();
+                let mut ip = self.fiber.ip;
+                let current_frame = self.fiber.frame();
 
                 for _ in 0..upvalue_len {
-                    match self.chunk.bytes.get(self.ip..self.ip + 2) {
+                    match self.chunk.bytes.get(ip..ip + 2) {
                         Some(bytes) => {
+                            ip += 2;
                             let upvalue = if bytes[0] != 0 {
                                 let upvalue = Upvalue::new_open(current_frame.stack_start + bytes[1] as usize);
                                 self.open_upvalues.push(upvalue);
@@ -504,11 +470,12 @@ impl Vm {
                             };
 
                             upvalues.push(upvalue);
-                            self.ip += 2;
                         },
                         None => return Err(RuntimeError::new_uncatchable(self, "[BytecodeReader]: Corrupted Bytecode. Expected 2 more bytes to get [IS_UPVALUE, UPVALUE_SLOT]."))
                     };
                 }
+
+                self.fiber.ip = ip;
 
                 let name = read_auto!(self);
                 let ptr = self.allocate_value_ptr(
@@ -516,65 +483,74 @@ impl Vm {
                         name: self.chunk.constants.get_string(name),
                         upvalues: upvalues.into_boxed_slice(),
                         start,
-                        max_slots,
-                        is_async
+                        max_slots
                     }
                 );
 
-                self.stack.push(Value::Function(ptr))
+                self.push(Value::Function(ptr))
             },
             RETURN => {
-                let frame = self.call_stack.pop().unwrap();
+                let frame = self.fiber.pop_frame();
                 let mut retain = self.open_upvalues.len();
 
                 for upvalue in self.open_upvalues.iter().rev() {
-                    match upvalue.state() {
-                        UpvalueState::Open(index) => {
-                            if frame.stack_start <= index {
-                                upvalue.close(self.stack[index])
-                            } else { break }
-                        },
-                        UpvalueState::Closed(_) => ()
+                    if let UpvalueState::Open(index) = upvalue.state() {
+                        if frame.stack_start <= index {
+                            upvalue.close(self.fiber.stack[index])
+                        } else { 
+                            break 
+                        }
                     }
 
                     retain -= 1;
                 }
 
-                self.stack.drain(frame.stack_start..frame.stack_start + frame.max_slots as usize);
+                self.fiber.stack.drain(frame.stack_start..);
                 self.open_upvalues.truncate(retain);
-                self.ip = frame.ip;
+                self.fiber.ip = frame.ip;
             },
             AND => {
                 let (lhs, rhs) = pop_two!(self); 
-                self.stack.push(Value::Bool(lhs.to_bool() && rhs.to_bool()));
+                self.push(Value::Bool(lhs.to_bool() && rhs.to_bool()));
             },
             NOT => {
-                let boolean = !self.stack.last().unwrap_or_default().to_bool();
-                self.stack.push(Value::Bool(boolean));
+                let boolean = !self.fiber.last_or_null().to_bool();
+                self.push(Value::Bool(boolean));
+            },
+            AWAIT => {
+                let target = self.fiber.pop();
+                let result = if let Value::Promise(ptr) = target {
+                    match self.await_(ptr.unwrap_mut()) {
+                        Ok(value) => value,
+                        Err(error) => return Err(error)
+                    }
+                } else { target };
+
+                self.push(result);
             },
             POW => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(lhs.pow(rhs));
+                self.push(lhs.pow(rhs));
             },
             BITAND => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(lhs & rhs);
+                self.push(lhs & rhs);
             },
             BITOR => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(lhs | rhs);
+                self.push(lhs | rhs);
             },
             BITXOR => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(lhs ^ rhs);
+                self.push(lhs ^ rhs);
             },
             SHR => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(lhs >> rhs);
+                self.push(lhs >> rhs);
             },
             SHL => {
                 let (lhs, rhs) = pop_two!(self);
-                self.stack.push(lhs << rhs);
+                self.push(lhs << rhs);
             },
             _ => return Err(RuntimeError::new_uncatchable(self, format!("[BytecodeReader]: Found an unknown byte {}.", byte)))
         }
@@ -586,16 +562,16 @@ impl Vm {
         match target {
             Value::NativeFn(ptr) => unsafe {
                 let nf = ptr.unwrap_ref();
-                let stack_offset_index = self.stack.len() - args_len as usize;
-                let args = ptr::slice_from_raw_parts(self.stack.as_mut_ptr().add(stack_offset_index), args_len as usize);
+                let offset = self.fiber.stack.len() - args_len as usize;
+                let args = ptr::slice_from_raw_parts(self.fiber.stack.as_mut_ptr().add(offset), args_len as usize);
+                self.fiber.new_frame(nf.name.clone(), 0, &[]);
 
-                self.call_stack.push(CallFrame { name: nf.name.clone(), ..Default::default() });
                 match (nf.func)(self, &*args) {
                     Ok(value) => {
-                        self.call_stack.pop();
-                        self.stack.set_len(stack_offset_index);
+                        self.fiber.pop_frame();
+                        self.fiber.stack.set_len(offset);
                         ptr::drop_in_place(args as *mut [Value]);
-                        self.stack.push(value);
+                        self.push(value);
                     },
                     Err(error) => return Err(error)
                 }
@@ -603,24 +579,11 @@ impl Vm {
                 Ok(())
             },
             Value::Function(ptr) => {
-                let Function { name, max_slots, start, upvalues, is_async } = ptr.unwrap_ref();
-                let stack_start = self.stack.len() - args_len as usize;
+                let Function { name, max_slots, start, upvalues } = ptr.unwrap_ref();
+                let stack_start = self.fiber.stack.len() - args_len as usize;
 
-                if *is_async {
-                    self.stack.resize(stack_start + *max_slots as usize, Value::Null);
-                    return Ok(());
-                }
-
-                self.call_stack.push(CallFrame { 
-                    ip: self.ip, 
-                    stack_start, 
-                    name: name.clone(), 
-                    upvalues: upvalues.to_vec(), 
-                    max_slots: *max_slots 
-                });
-
-                self.stack.resize(stack_start + *max_slots as usize, Value::Null);
-                self.ip = *start;
+                self.fiber.new_frame_with_offset(name, *max_slots, upvalues, args_len as usize);
+                self.fiber.ip = *start;
 
                 Ok(())
             },
@@ -640,18 +603,18 @@ impl Vm {
 
                 match map.get(&self.constants.init) {
                     Some(init_) => {
-                        self.stack.insert(self.stack.len() - args_len as usize, self_);
+                        self.fiber.stack.insert(self.fiber.stack.len() - args_len as usize, self_);
                         match self.call_function_with_returned_value(init_.0, args_len + 1) {
                             Ok(_) => {
-                                self.stack.push(self_);
+                                self.push(self_);
                                 Ok(())
                             },
                             Err(error) => Err(error)
                         }
                     },
                     None => {
-                        self.stack.truncate(self.stack.len() - args_len as usize);
-                        self.stack.push(self_);
+                        self.fiber.stack.truncate(self.fiber.stack.len() - args_len as usize);
+                        self.push(self_);
                         Ok(())
                     }
                 }
@@ -664,15 +627,14 @@ impl Vm {
         match target {
             Value::NativeFn(ptr) => unsafe {
                 let nf = ptr.unwrap_ref();
-                let stack_offset_index = self.stack.len() - args_len as usize;
-                let args = ptr::slice_from_raw_parts(self.stack.as_ptr().add(stack_offset_index), args_len as usize);
-
-                self.call_stack.push(CallFrame { name: nf.name.clone(), ..Default::default() });
+                let offset = self.fiber.stack.len() - args_len as usize;
+                let args = ptr::slice_from_raw_parts(self.fiber.stack.as_mut_ptr().add(offset), args_len as usize);
+                self.fiber.new_frame(nf.name.clone(), 0, &[]);
 
                 match (nf.func)(self, &*args) {
                     Ok(value) => {
-                        self.call_stack.pop();
-                        self.stack.set_len(stack_offset_index);
+                        self.fiber.pop_frame();
+                        self.fiber.stack.set_len(offset);
                         ptr::drop_in_place(args as *mut [Value]);
                         Ok(value)
                     },
@@ -680,28 +642,20 @@ impl Vm {
                 }
             },
             Value::Function(ptr) => {
-                let Function { 
-                    name, 
-                    max_slots, 
-                    start,
-                    upvalues,
-                    ..
-                } = ptr.unwrap();
+                let Function { name, max_slots, start, upvalues } = ptr.unwrap_ref();
+                let stack_start = self.fiber.stack.len() - args_len as usize;
+                let current_ip = self.fiber.ip;
 
-                let stack_start = self.stack.len() - args_len as usize;
-                let current_ip = self.ip;
+                self.fiber.new_frame_with_offset(name, *max_slots, upvalues, args_len as usize);
+                self.fiber.ip = *start;
 
-                self.call_stack.push(CallFrame { ip: self.ip, stack_start, name, upvalues: upvalues.to_vec(), max_slots });
-                self.stack.resize(stack_start + max_slots as usize, Value::Null);
-                self.ip = start;
-
-                while self.ip < self.chunk.bytes.len() {
+                while self.fiber.ip < self.chunk.bytes.len() {
                     // Ip would reach current ip if the RETURN opcode appeared
-                    if self.ip == current_ip {
-                        return Ok(self.stack.pop().unwrap_or(Value::Null));
+                    if self.fiber.ip == current_ip {
+                        return Ok(self.fiber.pop());
                     }
 
-                    match self.execute_byte(self.chunk.bytes[self.ip]) {
+                    match self.execute_byte(self.chunk.bytes[self.fiber.ip]) {
                         Ok(_) => (),
                         Err(error) => self.handle_error(error)?
                     }
@@ -725,14 +679,14 @@ impl Vm {
 
                 match map.get(&self.constants.init) {
                     Some(init_) => {
-                        self.stack.insert((self.stack.len() - args_len as usize) - 1, self_);
+                        self.fiber.stack.insert((self.fiber.stack.len() - args_len as usize) - 1, self_);
                         match self.call_function_with_returned_value(init_.0, args_len + 1) {
                             Ok(_) => Ok(self_),
                             Err(error) => Err(error)
                         }
                     },
                     None => {
-                        self.stack.truncate(self.stack.len() - args_len as usize);
+                        self.fiber.stack.truncate(self.fiber.stack.len() - args_len as usize);
                         Ok(self_)
                     }
                 }
@@ -741,7 +695,7 @@ impl Vm {
         }
     }
 
-    fn call_inst_function(&mut self, self_: Value, attr: Value, args_len: u8) -> RuntimeResult<()> {
+    pub fn call_inst_function(&mut self, self_: Value, attr: Value, args_len: u8) -> RuntimeResult<()> {
         macro_rules! inst_method {
             ($ptr:expr, $attr:ident) => {
                 match attr {
@@ -752,7 +706,7 @@ impl Vm {
                             Some(&function) => {
                                 match self.call_native_method(name.clone(), $ptr, args_len as usize, function) {
                                     Ok(value) => {
-                                        self.stack.push(value);
+                                        self.push(value);
                                         Ok(())
                                     },
                                     Err(error) => return Err(error)
@@ -790,7 +744,7 @@ impl Vm {
                             Some(&function) => {
                                 match self.call_native_method(string.clone(), ptr, args_len as usize, function) {
                                     Ok(value) => {
-                                        self.stack.push(value);
+                                        self.push(value);
                                         Ok(())
                                     },
                                     Err(error) => return Err(error)
@@ -805,7 +759,7 @@ impl Vm {
             Value::Instance(ptr) => {
                 let instance = ptr.unwrap_ref();
                 if let Some(method) = instance.methods.unwrap_ref().get(&attr) {
-                    self.stack.insert(self.stack.len() - args_len as usize, self_);
+                    self.fiber.stack.insert(self.fiber.stack.len() - args_len as usize, self_);
                     self.call_function(method.0, args_len + 1)
                 } else if let Some(property) = instance.properties.get(&attr) {
                     self.call_function(property.0, args_len)
@@ -815,11 +769,12 @@ impl Vm {
             },
             Value::Iterator(ptr) => inst_method!(ptr, iterator_methods),
             Value::String(ptr) => inst_method!(ptr, string_methods),
+            Value::Promise(ptr) => inst_method!(ptr, promise_methods),
             _ => Err(RuntimeError::new(self, format!("Cannot call a {}.", self_.get_type())))
         }
     }
 
-    fn call_native_method<T>(
+    pub fn call_native_method<T>(
         &mut self, 
         name: TinyString, 
         ptr: ValuePtr<T>, 
@@ -827,20 +782,18 @@ impl Vm {
         method: MethodFn<T>
     ) -> RuntimeResult<Value> {
         unsafe {
-            let stack_offset_index = self.stack.len() - args_len;
-            let args = ptr::slice_from_raw_parts(self.stack.as_ptr().add(stack_offset_index), args_len as usize);
-
-            self.call_stack.push(CallFrame { name, ..Default::default() });
+            let offset = self.fiber.stack.len() - args_len;
+            let args = ptr::slice_from_raw_parts(self.fiber.stack.as_ptr().add(offset), args_len as usize);
             let result = method(self, ptr.unwrap_mut(), ptr.0, &*args);
 
-            self.stack.set_len(stack_offset_index);
-            self.call_stack.pop();
+            self.fiber.stack.set_len(offset);
+            self.fiber.pop_frame();
             ptr::drop_in_place(args as *mut [Value]);
             result
         }
     }
 
-    fn resolve_attr(&mut self, target: Value, attr: Value) -> Value {
+    pub fn resolve_attr(&mut self, target: Value, attr: Value) -> Value {
         match target {
             Value::Dict(ptr) => {
                 match ptr.unwrap_ref().get(&attr) {
@@ -873,7 +826,7 @@ impl Vm {
         }
     }
 
-    pub(super) fn set_attr(&mut self, target: Value, attr: Value, value: Value, readonly: bool) -> RuntimeResult<()> {
+    pub fn set_attr(&mut self, target: Value, attr: Value, value: Value, readonly: bool) -> RuntimeResult<()> {
         match target {
             Value::Dict(ptr) => {
                 if let Some((_, true)) = ptr.unwrap_mut().insert(attr, (value, readonly)) {
@@ -909,18 +862,19 @@ impl Vm {
         Ok(())
     }
 
-    pub fn has_permission(&self, string: &str) -> bool {
-        self.flags.contains_key(&TinyString::new(&[b"use-", string.as_bytes()].concat()))
+    pub fn await_(&mut self, promise: &mut Promise) -> RuntimeResult<Value> {
+        loop {
+            match promise.state {
+                PromiseState::Pending => (),
+                PromiseState::Fulfilled(result) => return Ok(result),
+                PromiseState::Rejected(result) => return Err(RuntimeError::new(self, result))
+            }
+        }
     }
 
     pub fn add_global(&mut self, name: &str, value: Value) {
         let constant_id = self.chunk.constants.add_string(TinyString::new(name.as_bytes()));
         self.globals.insert(constant_id, (value, true));
-    }
-
-    fn add_local(&mut self, slot: usize, value: Value) {
-        let frame = self.call_stack.last().unwrap();
-        self.stack[frame.stack_start + slot] = value;
     }
 
     pub fn allocate<O: ObjectTrait>(&mut self, object: O) -> *mut u8 {
@@ -949,90 +903,117 @@ impl Vm {
         }
     }
 
-    pub(crate) fn allocate_value_ptr<O: ObjectTrait>(&mut self, object: O) -> ValuePtr<O> {
+    pub fn allocate_value_ptr<O: ObjectTrait>(&mut self, object: O) -> ValuePtr<O> {
         ValuePtr::new_unchecked(self.allocate(object))
     }
 
-    pub(crate) fn allocate_str_bytes(&mut self, bytes: &[u8]) -> ValuePtr<TinyString> {
+    pub fn allocate_str_bytes(&mut self, bytes: &[u8]) -> ValuePtr<TinyString> {
         let string = TinyString::new(bytes);
         ValuePtr::new_unchecked(self.allocate(string))
     }
 
-    pub(crate) fn allocate_static_str(&mut self, string: &str) -> ValuePtr<TinyString> {
+    pub fn allocate_static_str(&mut self, string: &str) -> ValuePtr<TinyString> {
         ValuePtr::new_unchecked(self.allocate(TinyString::new(string.as_bytes())))
     }
 
-    pub(crate) fn allocate_string(&mut self, string: String) -> ValuePtr<TinyString> {
+    pub fn allocate_string(&mut self, string: String) -> ValuePtr<TinyString> {
         ValuePtr::new_unchecked(self.allocate(TinyString::new(string.as_bytes())))
-    }
-
-    pub(crate) fn get_resource<T: Resource>(&self, resource_id: u32) -> Option<Rc<T>> {
-        self.resource_table.get(&resource_id)
-            .and_then(|rc| unsafe {
-                if rc.type_id() == TypeId::of::<T>() {
-                    Some((*(rc as *const Rc<_> as *const Rc<T>)).clone())
-                } else { None }
-            })
-    }
-
-    pub(crate) fn get_io_resource(&self, resource_id: u32) -> Option<Rc<dyn IoResource>> {
-        self.resource_table.get(&resource_id)
-            .and_then(|rc| unsafe {
-                if rc.kind() == ResourceKind::Io {
-                    Some((*(rc as *const Rc<_> as *const Rc<dyn IoResource>)).clone())
-                } else { None }
-            })
-    }
-
-    pub(crate) fn add_resource<T: Resource>(&mut self, resource: T) -> u32 {
-        let rid = self.next_rid;
-        assert!(self.resource_table.insert(self.next_rid, Rc::new(resource)).is_none());
-        self.next_rid += 1;
-        rid
     }
 
     pub fn collect_garbage(&mut self) {
-        unsafe fn mark_value(value: &Value) {
+        fn mark_value(value: &Value) {
             match value {
+                Value::String(ptr) => ptr.mark(),
                 Value::Array(ptr) => {
-                    let pointer = ptr.as_ptr();
-                    if pointer.is_null() {
-                        panic!("Could not mark the pointer while sweeping garbage.");
+                    for value in ptr.unwrap_ref() {
+                        mark_value(value);
                     }
 
-                    let items = ptr::read(pointer.add(next_alignment(GcHeader::SIZE, mem::align_of::<Vec<Value>>())) as *const Vec<Value>);
-                    for item in &items {
-                        mark_value(item)
+                    ptr.mark()
+                },
+                Value::Dict(ptr) => {
+                    for (key, value) in ptr.unwrap_ref() {
+                        mark_value(key);
+                        mark_value(&value.0)
                     }
 
-                    ptr::write(pointer as *mut bool, true);
+                    ptr.mark()
                 },
-                Value::String(ptr) => {
-                    ptr::write(ptr.as_ptr() as *mut bool, true);
+                Value::Function(ptr) => {
+                    for upvalue in &*ptr.unwrap_ref().upvalues {
+                        if let UpvalueState::Closed(value) = upvalue.state() {
+                            mark_value(&value);
+                        }
+                    }
+
+                    ptr.mark()
                 },
+                Value::NativeFn(ptr) => ptr.mark(),
+                Value::Iterator(ptr) => {
+                    for value in &ptr.unwrap_ref().to_vec() {
+                        mark_value(value);
+                    }
+
+                    ptr.mark()
+                },
+                Value::Instance(ptr) => {
+                    let instance = ptr.unwrap_ref();
+
+                    for (key, value) in &instance.properties {
+                        mark_value(key);
+                        mark_value(&value.0);
+                    }
+
+                    if !instance.methods.marked() {
+                        for (key, value) in instance.methods.unwrap_ref() {
+                            mark_value(key);
+                            mark_value(&value.0);
+                        }
+    
+                        instance.methods.mark();
+                    }
+
+                    ptr.mark();
+                },
+                // Not completed here
+                Value::Promise(ptr) => ptr.mark(),
                 _ => ()
             }
         }
 
         unsafe {
-            for value in &self.stack {
+            for value in &self.fiber.stack {
                 mark_value(value);
             }
 
-            for value in &self.stack {
-                mark_value(value);
+            for (_, value) in &self.globals {
+                mark_value(&value.0);
             }
 
-            for (_, (value, _)) in &self.globals {
-                mark_value(&value);
+            self.fiber.collect_upvalues(mark_value);
+
+            macro_rules! mark_vm_constants {
+                ($($attr:ident)+) => {
+                    $(mark_value(&self.constants.$attr);)+
+                };
             }
+
+            mark_vm_constants! {
+                init prototype rid pid stdin stdout stderr cwd cmd env
+                __listeners __time __date __promise
+            }
+
+            self.constants.process_prototype.mark();
+            self.constants.promise_handler_prototype.mark();
 
             // Clear all unreacable objects
             let mut index = 0;
 
             for handle in self.objects.clone() {
-                if handle.dealloc_if_unreachable() {
+                if let (true, size) = handle.dealloc_if_unreachable() {
+                    self.bytes_allocated -= size;
                     self.objects.remove(index);
+                    continue;
                 }
 
                 index += 1;
@@ -1042,26 +1023,22 @@ impl Vm {
         self.next_gc = self.bytes_allocated * 2;
     }
 
-}
-
-// Basically will execute bytes until there is a return opcode asynchronously. Using a 
-// mutable reference to the vm and a seperate stack and ip
-pub struct VmAsyncExecution<'a> {
-    pub(crate) vm: &'a mut Vm,
-    pub(crate) stack: Vec<Value>,
-    pub(crate) ip: usize
-}
-
-impl<'a> VmAsyncExecution<'a> {
-    pub fn new(vm: &'a mut Vm, ip: usize) -> Self {
-        Self { stack: vm.stack.clone(), ip, vm }
+    fn push(&mut self, value: Value) {
+        self.fiber.stack.push(value);
     }
 
-    pub async fn execute(&mut self) -> RuntimeResult<Value> {
-        Ok(Value::Null)
-    }
+}
 
-    pub async fn handle_error(&mut self, error: RuntimeError) -> RuntimeResult<()> {
-        handle_error!(error, self, self.vm)
+fn flags_has_permission(flags: &Flags, string: &str) -> bool {
+    flags.contains_key(&TinyString::new(&[b"use-", string.as_bytes()].concat()))
+}
+
+fn permission_from_flags(flags: &Flags) -> Permissions {
+    Permissions {
+        read: flags_has_permission(flags, "read"),
+        write: flags_has_permission(flags, "write"),
+        memory: flags_has_permission(flags, "memory"),
+        child_process: flags_has_permission(flags, "process"),
+        unsafe_libs: flags.contains_key(&TinyString::new(b"unsafe"))
     }
 }

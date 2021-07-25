@@ -285,7 +285,7 @@ impl BytecodeCompiler {
                 self.bytes.push(JUMP_BACK);
                 self.bytes.extend_from_slice(&((self.bytes.len() - loop_ip + 4) as u16).to_le_bytes());
 
-                let offset_bytes = ((self.bytes.len() - loop_ip) as u16).to_le_bytes();
+                let offset_bytes = ((self.bytes.len() - loop_ip - 4) as u16).to_le_bytes();
                 self.bytes[loop_ip + 2] = offset_bytes[0];
                 self.bytes[loop_ip + 3] = offset_bytes[1];
                 
@@ -458,7 +458,11 @@ impl BytecodeCompiler {
                 self.bytes.push(DICT);
                 self.load_constant_without_op(len);
             },
-            Expr::Function { name, parameters, inner, is_async } => {
+            Expr::Await(expr) => {
+                self.load_expr(*expr);
+                self.bytes.push(AWAIT);
+            },
+            Expr::Function { name, parameters, inner, .. } => {
                 self.bytes.extend_from_slice(&[FUNC, 0, 0]);
                 let offset_ip = self.bytes.len();
 
@@ -498,7 +502,7 @@ impl BytecodeCompiler {
                 self.update_offset(offset_ip);
 
                 let closure = self.closures.pop().unwrap();
-                self.bytes.extend_from_slice(&[closure.max_slots, closure.upvalues.len() as u8, is_async as u8]);
+                self.bytes.extend_from_slice(&[closure.max_slots, closure.upvalues.len() as u8]);
                 for upvalue in &closure.upvalues {
                     self.bytes.extend_from_slice(&[upvalue.is_local as u8, upvalue.index]);
                 }
@@ -529,8 +533,7 @@ impl BytecodeCompiler {
                 
                 self.load_expr(*falsy);
                 self.update_offset(jump_offset_ip);
-            },
-            _ => ()
+            }
         }
 
         true

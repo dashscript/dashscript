@@ -78,6 +78,7 @@ impl AST {
                         Keyword::For => self.keyword_for(index),
                         Keyword::Break => Stmt { expr: Expr::Break, index },
                         Keyword::Continue => Stmt { expr: Expr::Continue, index },
+                        Keyword::Await => Stmt { expr: self.expression_await(), index },
                         Keyword::If => {
                             let statement = self.keyword_if(index);
                             self.statements.push(statement);
@@ -403,6 +404,7 @@ impl AST {
                     expr
                 },
                 TokenKind::Keyword(Keyword::Func) => self.expression_function(false),
+                TokenKind::Keyword(Keyword::Await) => return self.expression_await(),
                 _ => {
                     self.error(token.position, kind);
                     Expr::Null
@@ -438,6 +440,7 @@ impl AST {
                 expr
             },
             TokenKind::Keyword(Keyword::Func) => self.expression_function(false),
+            TokenKind::Keyword(Keyword::Await) => return self.expression_await(),
             _ => {
                 unexpected_token!(self, kind, token);
                 Expr::Null
@@ -574,6 +577,10 @@ impl AST {
         }
     }
 
+    pub fn expression_await(&mut self) -> Expr {
+        Expr::Await(Box::new(self.expression(ASTErrorKind::ExpectedValue)))
+    }
+
     pub fn expression_call(&mut self) -> Vec<Expr> {
         let mut params = Vec::new();
 
@@ -705,6 +712,7 @@ impl AST {
                         Keyword::For => self.keyword_for(index),
                         Keyword::Break => Stmt { expr: Expr::Break, index },
                         Keyword::Continue => Stmt { expr: Expr::Continue, index },
+                        Keyword::Await => Stmt { expr: self.expression_await(), index },
                         Keyword::If => {
                             let statement = self.keyword_if(index);
                             statements.push(statement);

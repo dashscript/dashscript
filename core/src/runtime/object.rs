@@ -10,7 +10,8 @@ pub enum ObjectKind {
     Map,
     Iterator,
     String,
-    Instance
+    Instance,
+    Promise
 }
 
 pub trait ObjectTrait {
@@ -55,14 +56,47 @@ pub struct Function {
     pub(crate) name: TinyString,
     pub(crate) upvalues: Box<[Upvalue]>,
     pub(crate) start: usize,
-    pub(crate) max_slots: u8,
-    pub(crate) is_async: bool
+    pub(crate) max_slots: u8
 }
 
 #[derive(Debug, Clone)]
 pub struct Instance {
     pub(crate) properties: Map,
     pub(crate) methods: ValuePtr<Map>
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum PromiseState {
+    Fulfilled(Value),
+    Rejected(Value),
+    Pending
+}
+
+impl PromiseState {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Fulfilled(_) => "fulfilled",
+            Self::Rejected(_) => "rejected",
+            Self::Pending => "pending"
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Promise {
+    pub(crate) then: Option<Value>,
+    pub(crate) catch: Option<Value>,
+    pub(crate) state: PromiseState
+}
+
+impl Promise {
+    pub fn new() -> Promise {
+        Self {
+            then: None,
+            catch: None,
+            state: PromiseState::Pending
+        }
+    }
 }
 
 impl_default_object_trait! {
@@ -73,4 +107,5 @@ impl_default_object_trait! {
     ValueIter: Iterator
     TinyString: String
     Instance: Instance
+    Promise: Promise
 }

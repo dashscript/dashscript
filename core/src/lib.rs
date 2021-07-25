@@ -22,4 +22,5 @@ pub use runtime::iterator::ValueIter;
 pub use runtime::memory::{GcHeader, ValuePtr};
 pub use runtime::core;
 pub use runtime::resources::*;
+pub use runtime::fiber::*;
 pub use tiny_string::TinyString;

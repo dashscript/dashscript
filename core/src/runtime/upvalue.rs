@@ -4,7 +4,7 @@ use std::ptr::{self, NonNull};
 use std::alloc::Layout;
 use crate::{Value};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum UpvalueState {
     Open(usize),
     Closed(Value)
@@ -41,7 +41,7 @@ impl Upvalue {
     }
 
     pub fn state(&self) -> UpvalueState {
-        unsafe { ptr::read(self.0.as_ptr() as *const UpvalueState) }
+        unsafe { *(self.0.as_ptr() as *const UpvalueState) }
     }
 
     pub unsafe fn dealloc(self) {
