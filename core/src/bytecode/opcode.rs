@@ -95,6 +95,7 @@ write_main_opcodes!(
     // Dead bytecodes 
     POW = 80
     AWAIT = 90
+    YIELD = 91
 );
 
 // Assignment operation codes

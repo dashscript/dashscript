@@ -7,10 +7,11 @@ use std::collections::HashMap;
 use super::memory::*;
 use crate::{
     Value, RuntimeResult, RuntimeError, ObjectTrait, Chunk, TinyString, Function, Upvalue, 
-    UpvalueState, ValueIter, ValuePtr, Instance, Map, Fiber, Promise, PromiseState, 
-    ResourceTable, opcode, core
+    UpvalueState, ValueIter, ValuePtr, Instance, Map, Fiber, ResourceTable, Generator,
+    opcode, core
 };
 
+// Used to read a byte forward in the bytecode.
 macro_rules! read_u8 {
     ($self:expr) => {
         match $self.chunk.bytes.get($self.fiber.ip) {
@@ -23,6 +24,7 @@ macro_rules! read_u8 {
     };
 }
 
+// Used to read u16 by reading 2 bytes ahead.
 macro_rules! read_u16 {
     ($self:expr) => {
         match $self.chunk.bytes.get($self.fiber.ip..$self.fiber.ip + 2) {
@@ -35,6 +37,7 @@ macro_rules! read_u16 {
     };
 }
 
+// Used to read u32 by reding 4 bytes ahead.
 macro_rules! read_u32 {
     ($self:expr) => {
         match $self.chunk.bytes.get($self.fiber.ip..$self.fiber.ip + 4) {
@@ -47,6 +50,9 @@ macro_rules! read_u32 {
     };
 }
 
+// Used to read a configurable number with two cases.
+// Case 1: 0 | [1 byte]   If the first byte is 0, then need to read 1 more byte to form u8.
+// Case 2: 1 | [4 bytes]  If the second byte is 1, then need to read 4 more bytes to from u32.
 macro_rules! read_auto {
     ($self:expr) => {
         match $self.chunk.bytes[$self.fiber.ip] {
@@ -63,6 +69,7 @@ macro_rules! read_auto {
     };
 }
 
+// Used to read a string by a paticular index.
 macro_rules! read_string {
     ($self:expr, $index:expr) => {{
         let bytes = match $self.chunk.constants.strings.get($index as usize) {
@@ -76,6 +83,7 @@ macro_rules! read_string {
     }};
 }
 
+// Fix this shit
 macro_rules! pop_two {
     ($self:expr) => {
         match $self.fiber.pop_two() {
@@ -87,8 +95,10 @@ macro_rules! pop_two {
 
 pub type MethodFn<T> = fn (&mut Vm, &mut T, *const u8, &[Value]) -> RuntimeResult<Value>;
 pub type MethodMap<T> = HashMap<TinyString, MethodFn<T>>;
-type Flags = HashMap<TinyString, TinyString>;
+pub type Flags = HashMap<TinyString, TinyString>;
 
+// The permissions which are used by the standard native library. Mainly focused to remove 
+// of unwanted modules which will not be used in the runtime. 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Permissions {
     pub read: bool,
@@ -98,6 +108,9 @@ pub struct Permissions {
     pub unsafe_libs: bool
 }
 
+// A dictionary of strings which are been mostly used by the native standard library.
+// Instead of allocating the same strings everytime, these are some constant strings which
+// is allocated when the VM is created.
 #[derive(Default)]
 pub struct Constants {
     init: Value,
@@ -118,6 +131,7 @@ pub struct Constants {
     pub(super) promise_handler_prototype: ValuePtr<Map>
 }
 
+// The main vm which contains all the necessities to execute the bytecode.
 pub struct Vm {
     pub(crate) chunk: Chunk,
     pub(crate) permissions: Permissions,
@@ -130,7 +144,6 @@ pub struct Vm {
     pub iterator_methods: MethodMap<ValueIter>,
     pub string_methods: MethodMap<TinyString>,
     pub array_methods: MethodMap<Vec<Value>>,
-    pub promise_methods: MethodMap<Promise>,
     pub globals: HashMap<u32, (Value, bool)>,
     pub resource_table: ResourceTable,
     flags: Flags,
@@ -158,7 +171,6 @@ impl Vm {
             permissions,
             array_methods: MethodMap::new(),
             string_methods: MethodMap::new(),
-            promise_methods: MethodMap::new(),
             iterator_methods: MethodMap::new(),
             constants: Constants::default(),
             globals: HashMap::new(),
@@ -228,6 +240,8 @@ impl Vm {
 
     pub fn execute_byte(&mut self, byte: u8) -> RuntimeResult<()> {
         use opcode::*;
+
+        println!("{} {:?}", to_string(byte), self.fiber.stack);
 
         // Increment the ip whenever executing the byte
         self.fiber.ip += 1;
@@ -340,21 +354,12 @@ impl Vm {
                 self.open_upvalues.truncate(retain);
             },
             ITER => {
-                let iter = self.fiber.pop().into_iter();
-                let ptr = self.allocate_value_ptr(iter);
-                self.push(Value::Iterator(ptr))
+                let value = self.fiber.pop();
+                let iter = self.iter_value(value);
+                self.push(iter)
             },
             ITER_NEXT => {
-                let slot = read_u8!(self);
-                let jump_index = read_u16!(self);
-
-                match self.fiber.last().unwrap().iter_next() {
-                    Some(value) => self.fiber.set_slot(slot, value),
-                    None => {
-                        self.fiber.set_slot(slot, Value::Null);
-                        self.fiber.ip += jump_index as usize;
-                    }
-                }
+                return self.iter_next();
             },
             EQ => {
                 let (lhs, rhs) = pop_two!(self);
@@ -445,10 +450,10 @@ impl Vm {
                 let start = self.fiber.ip + 2;
                 self.fiber.ip += read_u16!(self) as usize;
                 
-                let (max_slots, upvalue_len) = match self.chunk.bytes.get(self.fiber.ip..self.fiber.ip + 2) {
+                let (has_yield, max_slots, upvalue_len) = match self.chunk.bytes.get(self.fiber.ip..self.fiber.ip + 3) {
                     Some(bytes) => {
-                        self.fiber.ip += 2;
-                        (bytes[0], bytes[1])
+                        self.fiber.ip += 3;
+                        (bytes[0] != 0, bytes[1], bytes[2])
                     },
                     None => return Err(RuntimeError::new_uncatchable(self, "[BytecodeReader]: Corrupted Bytecode. Expected 2 more bytes to get [MAX_SLOTS, UPVALUES_COUNT]."))
                 };
@@ -478,16 +483,20 @@ impl Vm {
                 self.fiber.ip = ip;
 
                 let name = read_auto!(self);
-                let ptr = self.allocate_value_ptr(
-                    Function {
-                        name: self.chunk.constants.get_string(name),
-                        upvalues: upvalues.into_boxed_slice(),
-                        start,
-                        max_slots
-                    }
-                );
+                let function = Function {
+                    name: self.chunk.constants.get_string(name),
+                    upvalues: upvalues.into_boxed_slice(),
+                    start,
+                    max_slots
+                };
 
-                self.push(Value::Function(ptr))
+                let value = if has_yield {
+                    Value::Function(self.allocate_value_ptr(function))
+                } else {
+                    Value::Generator(self.allocate_value_ptr(Generator(function)))
+                };
+
+                self.push(value)
             },
             RETURN => {
                 let frame = self.fiber.pop_frame();
@@ -519,13 +528,7 @@ impl Vm {
             },
             AWAIT => {
                 let target = self.fiber.pop();
-                let result = if let Value::Promise(ptr) = target {
-                    match self.await_(ptr.unwrap_mut()) {
-                        Ok(value) => value,
-                        Err(error) => return Err(error)
-                    }
-                } else { target };
-
+                let result = self.await_value(target);
                 self.push(result);
             },
             POW => {
@@ -580,11 +583,18 @@ impl Vm {
             },
             Value::Function(ptr) => {
                 let Function { name, max_slots, start, upvalues } = ptr.unwrap_ref();
-                let stack_start = self.fiber.stack.len() - args_len as usize;
 
                 self.fiber.new_frame_with_offset(name, *max_slots, upvalues, args_len as usize);
                 self.fiber.ip = *start;
 
+                Ok(())
+            },
+            Value::Generator(ptr) => {
+                let Generator(Function { name, max_slots, start, upvalues }) = ptr.unwrap_ref();
+                let mut fiber = self.fiber.child(name, *max_slots, *start);
+                fiber.new_frame_with_offset_and_ip(name, *max_slots, upvalues, args_len as usize, self.fiber.ip);
+                let fiber = Value::Fiber(self.allocate_value_ptr(fiber));
+                self.push(fiber);
                 Ok(())
             },
             Value::Dict(ptr) => {
@@ -643,7 +653,6 @@ impl Vm {
             },
             Value::Function(ptr) => {
                 let Function { name, max_slots, start, upvalues } = ptr.unwrap_ref();
-                let stack_start = self.fiber.stack.len() - args_len as usize;
                 let current_ip = self.fiber.ip;
 
                 self.fiber.new_frame_with_offset(name, *max_slots, upvalues, args_len as usize);
@@ -662,6 +671,12 @@ impl Vm {
                 }
 
                 Ok(Value::Null)
+            },
+            Value::Generator(ptr) => {
+                let Generator(Function { name, max_slots, start, upvalues }) = ptr.unwrap_ref();
+                let mut fiber = self.fiber.child(name, *max_slots, *start);
+                fiber.new_frame_with_offset_and_ip(name, *max_slots, upvalues, args_len as usize, self.fiber.ip);
+                Ok(Value::Fiber(self.allocate_value_ptr(fiber)))
             },
             Value::Dict(ptr) => {
                 let map = ptr.unwrap_ref();
@@ -769,7 +784,6 @@ impl Vm {
             },
             Value::Iterator(ptr) => inst_method!(ptr, iterator_methods),
             Value::String(ptr) => inst_method!(ptr, string_methods),
-            Value::Promise(ptr) => inst_method!(ptr, promise_methods),
             _ => Err(RuntimeError::new(self, format!("Cannot call a {}.", self_.get_type())))
         }
     }
@@ -862,14 +876,83 @@ impl Vm {
         Ok(())
     }
 
-    pub fn await_(&mut self, promise: &mut Promise) -> RuntimeResult<Value> {
-        loop {
-            match promise.state {
-                PromiseState::Pending => (),
-                PromiseState::Fulfilled(result) => return Ok(result),
-                PromiseState::Rejected(result) => return Err(RuntimeError::new(self, result))
+    pub fn await_value(&mut self, value: Value) -> Value {
+        match value {
+            _ => value
+        }
+    }
+
+    pub fn iter_value(&mut self, value: Value) -> Value {
+        match value {
+            Value::Array(ptr) => Value::Iterator(self.allocate_value_ptr(ValueIter::new(ptr.unwrap_ref()))),
+            Value::Iterator(_) | Value::Fiber(_) => value,
+            _ => Value::Iterator(self.allocate_value_ptr(ValueIter::default()))
+        }
+    }
+
+    pub fn iter_next(&mut self) -> RuntimeResult<()> {
+        let slot = read_u8!(self);
+        let jump_index = read_u16!(self);
+        let iterated = match self.fiber.last().unwrap() {
+            Value::Iterator(ptr) => ptr.unwrap_mut().next(),
+            Value::Fiber(ptr) => {
+                let current_ip = self.fiber.ip;
+                self.fiber = ptr.unwrap();
+
+                loop {
+                    if self.fiber.ip < self.chunk.bytes.len() {
+                        let byte = self.chunk.bytes[self.fiber.ip];
+                        println!("ITERATED: {} {:?}", opcode::to_string(byte), self.fiber.stack);
+
+                        match byte {
+                            opcode::YIELD => {
+                                unsafe { self.move_upper_fiber() }
+                                self.fiber.ip = current_ip;
+                                break Some(self.fiber.pop())
+                            },
+                            opcode::RETURN => {
+                                let stack_start = self.fiber.frame().stack_start;
+                                let mut retain = self.open_upvalues.len();
+                
+                                for upvalue in self.open_upvalues.iter().rev() {
+                                    if let UpvalueState::Open(index) = upvalue.state() {
+                                        if stack_start <= index {
+                                            upvalue.close(self.fiber.stack[index])
+                                        } else { 
+                                            break 
+                                        }
+                                    }
+                
+                                    retain -= 1;
+                                }
+                                
+                                self.open_upvalues.truncate(retain);
+                                unsafe { self.move_upper_fiber() }
+                                break None;
+                            },
+                            _ => {
+                                if let Err(error) = self.execute_byte(byte) {
+                                    self.handle_error(error)?
+                                }
+                            }
+                        }
+                    } else {
+                        break None
+                    }
+                }
+            },
+            _ => None
+        };
+
+        match iterated {
+            Some(value) => self.fiber.set_slot(slot, value),
+            None => {
+                self.fiber.set_slot(slot, Value::Null);
+                self.fiber.ip += jump_index as usize;
             }
         }
+
+        Ok(())
     }
 
     pub fn add_global(&mut self, name: &str, value: Value) {
@@ -975,8 +1058,7 @@ impl Vm {
 
                     ptr.mark();
                 },
-                // Not completed here
-                Value::Promise(ptr) => ptr.mark(),
+                // Not completed yet
                 _ => ()
             }
         }
@@ -1025,6 +1107,10 @@ impl Vm {
 
     fn push(&mut self, value: Value) {
         self.fiber.stack.push(value);
+    }
+
+    unsafe fn move_upper_fiber(&mut self) {
+        self.fiber = self.fiber.take_upper();
     }
 
 }

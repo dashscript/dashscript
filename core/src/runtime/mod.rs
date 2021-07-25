@@ -7,5 +7,4 @@ pub mod object;
 pub mod iterator;
 pub mod core;
 pub mod resources;
-pub mod generator;
 pub mod fiber;

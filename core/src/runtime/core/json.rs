@@ -51,7 +51,8 @@ impl Value {
             },
             Value::Function(_) | Value::NativeFn(_) => "\"[Function]\"".to_string(),
             Value::Iterator(_) => "\"[Iterator]\"".to_string(),
-            Value::Promise(promise) => format!("\"[Promise<{}>]\"", promise.unwrap_str())
+            Value::Fiber(_) => "\"[Fiber]\"".to_string(),
+            Value::Generator(_) => "\"[Generator]\"".to_string()
         }
     }
 

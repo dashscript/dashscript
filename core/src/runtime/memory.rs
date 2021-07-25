@@ -4,7 +4,7 @@ use alloc::alloc::Layout;
 use std::marker::PhantomData;
 use std::{ptr, mem};
 use std::fmt::{self, Debug, Formatter};
-use crate::{Value, Map, ValueIter, TinyString, Instance, Promise};
+use crate::{Value, Map, ValueIter, TinyString, Instance, Generator, Fiber};
 use super::object::{self, ObjectKind};
 
 pub(crate) const USIZE_SIZE: usize = mem::size_of::<usize>();
@@ -144,7 +144,8 @@ impl GcHandle {
             ObjectKind::Iterator => deallocate!(self.0, ValueIter),
             ObjectKind::String => deallocate!(self.0, TinyString),
             ObjectKind::Instance => deallocate!(self.0, object::Instance),
-            ObjectKind::Promise => deallocate!(self.0, object::Promise)
+            ObjectKind::Fiber => deallocate!(self.0, Fiber),
+            ObjectKind::Generator => deallocate!(self.0, Generator)
         }
     }
 
@@ -164,7 +165,8 @@ impl GcHandle {
                 ObjectKind::Iterator => deallocate!(self.0, ValueIter),
                 ObjectKind::String => deallocate!(self.0, TinyString),
                 ObjectKind::Instance => deallocate!(self.0, object::Instance),
-                ObjectKind::Promise => deallocate!(self.0, object::Promise)
+                ObjectKind::Fiber => deallocate!(self.0, Fiber),
+                ObjectKind::Generator => deallocate!(self.0, Generator)
             };
 
             (true, size)
@@ -270,12 +272,6 @@ impl ValuePtr<Vec<Value>> {
         for byte in bytes {
             array.push(Value::Int(*byte as _));
         }
-    }
-}
-
-impl ValuePtr<Promise> {
-    pub fn unwrap_str(&self) -> &str {
-        self.unwrap_ref().state.as_str()
     }
 }
 

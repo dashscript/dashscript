@@ -1,5 +1,5 @@
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::{Vm, Value, TinyString, Map, RuntimeError, Instance, Promise, RuntimeResult, PromiseState};
+use crate::{Vm, Value, TinyString, Map, RuntimeError, Instance};
 use super::map_builder::{MapBuilder, ClassBuilder};
 use super::date::{self, UNIX_EPOCH_DATE};
 
@@ -432,137 +432,6 @@ pub fn init_process(vm: &mut Vm) -> Value {
     Value::Dict(class)
 }
 
-pub fn init_promise_handler(vm: &mut Vm) {
-    let mut promise_handler = ClassBuilder::new(vm);
-
-    promise_handler.init(|vm, _| {
-        Err(RuntimeError::new(vm, "[PromiseHandler.init]: Cannot initiate `PromiseHandler` which is only meant for native dashscript purpose."))
-    });
-
-    promise_handler.prototype_fn("resolve", |vm, args| {
-        let promise = unwrap_promise(vm, args)?;
-        let value = *args.get(1).unwrap_or_default();
-        if promise.state != PromiseState::Pending {
-            return Err(RuntimeError::new(vm, "[Promise.resolve]: You could not resolve a promise which has been fulfilled or rejected."))
-        }
-
-        promise.state = PromiseState::Fulfilled(value);
-
-        if let Some(function) = promise.then.take() {
-            vm.fiber.stack.push(value);
-            vm.call_function_with_returned_value(function, 1)
-        } else {
-            Ok(Value::Null)
-        }
-    });
-
-    promise_handler.prototype_fn("reject", |vm, args| {
-        let promise = unwrap_promise(vm, args)?;
-        let value = *args.get(1).unwrap_or_default();
-        if promise.state != PromiseState::Pending {
-            return Err(RuntimeError::new(vm, "[Promise.reject]: You could not reject a promise which has been fulfilled or rejected."))
-        }
-
-        promise.state = PromiseState::Rejected(value);
-
-        if let Some(function) = promise.catch.take() {
-            vm.fiber.stack.push(value);
-            vm.call_function_with_returned_value(function, 1)
-        } else {
-            Err(RuntimeError::new(vm, format!("[PromiseRejection]: {}", value)))
-        }
-    });
-
-    promise_handler.prototype_fn("state", |vm, args| {
-        let state = unwrap_promise(vm, args)?.state.as_str();
-        Ok(Value::String(vm.allocate_static_str(state)))
-    });
-
-    vm.constants.promise_handler_prototype = promise_handler.allocate_value_ptr_with_prototype().1;
-}
-
-pub fn init_event_emitter(vm: &mut Vm) -> Value {
-    let mut event_emitter = ClassBuilder::new(vm);
-
-    event_emitter.init(|vm, args| {
-        if let Some(target) = args.get(0) {
-            let empty_entries = Value::Dict(vm.allocate_value_ptr(Map::new()));
-            vm.set_attr(*target, vm.constants.__listeners, empty_entries, false)?;
-        }
-
-        Ok(Value::Null)
-    });
-
-    event_emitter.prototype_fn("on", |vm, args| {
-        match args.get(0..3) {
-            Some([Value::Instance(ptr), key, callback]) if callback.is_function() => {
-                let instance = ptr.unwrap_mut();
-                if let Some((Value::Dict(ptr), _)) = instance.properties.get(&vm.constants.__listeners) {
-                    let __listeners = ptr.unwrap_mut();
-                    match __listeners.get(key) {
-                        Some((Value::Array(ptr), _)) => ptr.unwrap_mut().push(*callback),
-                        _ => {
-                            let callbacks = Value::Array(vm.allocate_value_ptr(vec![*callback]));
-                            __listeners.insert(*key, (callbacks, false));
-                        }
-                    }
-                } 
-
-                Ok(Value::Null)
-            },
-            _ => Err(RuntimeError::new(vm, "[EventEmitter.on]: Expected (EventEmitter, string, function) arguments."))
-        }
-    });
-
-    event_emitter.prototype_fn("emit", |vm, args| {
-        match args.get(0..2) {
-            Some([Value::Instance(ptr), key]) => {
-                let instance = ptr.unwrap_mut();
-                if let Some((Value::Dict(ptr), _)) = instance.properties.get(&vm.constants.__listeners) {
-                    if let Some((Value::Array(array_ptr), _)) = ptr.unwrap_mut().get(key) {
-                        let parameters = &args[2..];
-                        let len = parameters.len() as u8;
-                        vm.fiber.stack.extend_from_slice(parameters);
-
-                        for callback in array_ptr.unwrap_ref() {
-                            vm.call_function_with_returned_value(*callback, len)?;
-                        }
-                    }
-                } 
-
-                Ok(Value::Null)
-            },
-            _ => Err(RuntimeError::new(vm, "[EventEmitter.emit]: Expected (EventEmitter, string, ...args) arguments."))
-        }
-    });
-
-    event_emitter.prototype_fn("off", |vm, args| {
-        match args.get(0..3) {
-            Some([Value::Instance(ptr), key, callback]) if callback.is_function() => {
-                let instance = ptr.unwrap_mut();
-                if let Some((Value::Dict(ptr), _)) = instance.properties.get(&vm.constants.__listeners) {
-                    if let Some((Value::Array(ptr), _)) = ptr.unwrap_mut().get(key) {
-                        let mut index = 0;
-                        let callbacks = ptr.unwrap_mut();
-                        while let Some(callback_) = callbacks.get(index) {
-                            if callback_ == callback {
-                                callbacks.remove(index);
-                            }
-
-                            index += 1;
-                        }
-                    }
-                } 
-
-                Ok(Value::Null)
-            },
-            _ => Err(RuntimeError::new(vm, "[EventEmitter.on]: Expected (EventEmitter, string, function) arguments."))
-        }
-    });
-
-    Value::Dict(event_emitter.allocate_value_ptr())
-}
-
 pub fn initiate_process_instance(
     vm: &mut Vm, 
     rid: u32, 
@@ -591,28 +460,4 @@ pub fn initiate_process_instance(
             methods: vm.constants.process_prototype
         }
     ))
-}
-
-pub fn initiate_promise_handler_instance(vm: &mut Vm, promise: Value) -> Value {
-    let mut properties = Map::with_capacity(1);
-    properties.insert(vm.constants.__promise, (promise, true));
-
-    Value::Instance(vm.allocate_value_ptr(
-        Instance { 
-            properties, 
-            methods: vm.constants.promise_handler_prototype
-        }
-    ))
-}
-
-fn unwrap_promise<'a>(vm: &mut Vm, args: &[Value]) -> RuntimeResult<&'a mut Promise> {
-    match args.get(0) {
-        Some(Value::Instance(ptr)) => {
-            match ptr.unwrap_map().get(&vm.constants.__promise) {
-                Some((Value::Promise(ptr), _)) => Ok(ptr.unwrap_mut()),
-                _ => Err(RuntimeError::new(vm, "[PromiseHandler]: Expected (PromiseHandler) arguments."))
-            }
-        },
-        _ => Err(RuntimeError::new(vm, "[PromiseHandler]: Expected (PromiseHandler) arguments."))
-    }
 }

@@ -1,6 +1,6 @@
 use std::fmt::{self, Debug, Formatter};
 use std::collections::HashMap;
-use crate::{RuntimeResult, Value, TinyString, Vm, Upvalue, ValueIter, ValuePtr};
+use crate::{RuntimeResult, Value, TinyString, Vm, Upvalue, ValueIter, ValuePtr, Fiber};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ObjectKind {
@@ -11,7 +11,8 @@ pub enum ObjectKind {
     Iterator,
     String,
     Instance,
-    Promise
+    Fiber,
+    Generator
 }
 
 pub trait ObjectTrait {
@@ -65,47 +66,17 @@ pub struct Instance {
     pub(crate) methods: ValuePtr<Map>
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum PromiseState {
-    Fulfilled(Value),
-    Rejected(Value),
-    Pending
-}
-
-impl PromiseState {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Fulfilled(_) => "fulfilled",
-            Self::Rejected(_) => "rejected",
-            Self::Pending => "pending"
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
-pub struct Promise {
-    pub(crate) then: Option<Value>,
-    pub(crate) catch: Option<Value>,
-    pub(crate) state: PromiseState
-}
-
-impl Promise {
-    pub fn new() -> Promise {
-        Self {
-            then: None,
-            catch: None,
-            state: PromiseState::Pending
-        }
-    }
-}
+pub struct Generator(pub(crate) Function);
 
 impl_default_object_trait! {
     NativeFunction: NativeFunction
     Vec<Value>: Array
     Map: Map
     Function: Function
+    Generator: Generator
     ValueIter: Iterator
     TinyString: String
     Instance: Instance
-    Promise: Promise
+    Fiber: Fiber
 }

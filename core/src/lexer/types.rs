@@ -42,6 +42,7 @@ pub enum Keyword {
     Const,
     Func,
     Return,
+    Yield,
     If,
     Elif,
     Else,

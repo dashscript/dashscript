@@ -9,15 +9,19 @@ pub struct CallFrame {
     pub(crate) ip: usize // This would be 0 if the call frame belongs to a native function
 }
 
+#[derive(Debug, Clone)]
 pub struct Fiber {
     pub(crate) stack: Vec<Value>,
     pub(crate) ip: usize,
+    #[cfg(feature = "debug_fiber")]
+    pub(crate) id: u16,
     frame: *mut CallFrame,
     frames: Vec<CallFrame>,
     upper: Option<*mut Fiber>
 }
 
 impl Fiber {
+
 
     pub fn new<N>(name: N, max_slots: u8, ip: usize) -> Self
     where 
@@ -30,6 +34,8 @@ impl Fiber {
             stack,
             frames,
             ip,
+            #[cfg(feature = "debug_fiber")]
+            id: 1,
             upper: None
         };
 
@@ -76,6 +82,24 @@ impl Fiber {
             stack_start,
             max_slots,
             ip: self.ip
+        });
+
+        self.frame = unsafe { self.frames.as_mut_ptr().add(self.frames.len() - 1) };
+    }
+
+    pub fn new_frame_with_offset_and_ip<N>(&mut self, name: N, max_slots: u8, upvalues: &[Upvalue], offset: usize, ip: usize)
+    where
+        N: Into<TinyString>
+    {
+        let stack_start = self.stack.len() - offset;
+
+        self.stack.resize(stack_start + max_slots as usize, Value::Null);
+        self.frames.push(CallFrame {
+            name: name.into(),
+            upvalues: upvalues.to_vec(),
+            stack_start,
+            max_slots,
+            ip
         });
 
         self.frame = unsafe { self.frames.as_mut_ptr().add(self.frames.len() - 1) };
@@ -132,12 +156,18 @@ impl Fiber {
         }
     }
 
-    pub fn child<N>(&self, name: N, max_slots: u8, ip: usize) -> Self
+    pub fn child<N>(&mut self, name: N, max_slots: u8, ip: usize) -> Self
     where 
         N: Into<TinyString>
     {
         let mut fiber = Self::new(name, max_slots, ip);
-        fiber.upper = Some(self as *const Self as *mut Self);
+        fiber.upper = Some(self as *mut Self);
+
+        #[cfg(feature = "debug_fiber")]
+        {
+            fiber.id += self.id;
+        }
+
         fiber
     }
 
@@ -269,6 +299,10 @@ impl Fiber {
 
         self.stack.truncate(new_len);
         result
+    }
+
+    pub unsafe fn take_upper(&mut self) -> Self {
+        std::ptr::read(self.upper.unwrap())
     }
 
 }

@@ -31,7 +31,6 @@ pub fn init(vm: &mut Vm) {
         "Math" => init_math
         "Date" => init_date
         "JSON" => init_json
-        "EventEmitter" => init_event_emitter
         "Process" => init_process
     }
 
@@ -44,8 +43,6 @@ pub fn init(vm: &mut Vm) {
     methods::object::init(vm);
     methods::function::init(vm);
     methods::array::init(vm);
-    methods::promise::init(vm);
-    builtin::init_promise_handler(vm);
 
     macro_rules! native_fn {
         ($bytes:expr, $value:expr) => {{

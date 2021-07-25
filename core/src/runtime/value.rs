@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::string::ToString;
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
-use crate::{TinyString, Map, ValueIter, Vm, ValuePtr, Function, NativeFunction, Instance, Promise};
+use crate::{TinyString, Map, ValueIter, Vm, ValuePtr, Function, NativeFunction, Instance, Fiber, Generator};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
@@ -19,7 +19,8 @@ pub enum Value {
     NativeFn(ValuePtr<NativeFunction>),
     Iterator(ValuePtr<ValueIter>),
     Instance(ValuePtr<Instance>),
-    Promise(ValuePtr<Promise>),
+    Generator(ValuePtr<Generator>),
+    Fiber(ValuePtr<Fiber>),
     Null // The basic null or empty value
 }
 
@@ -51,7 +52,8 @@ impl Value {
             Self::Array(_) => TinyString::new(b"[Array]"),
             Self::Function(_) | Self::NativeFn(_) => TinyString::new(b"[Function]"),
             Self::Iterator(_) => TinyString::new(b"[Iterator]"),
-            Self::Promise(_) => TinyString::new(b"[Promise]"),
+            Self::Generator(_) => TinyString::new(b"[Generator]"),
+            Self::Fiber(_) => TinyString::new(b"[Fiber]"),
             Self::Null => TinyString::new(b"null"),
         }
     }
@@ -84,7 +86,8 @@ impl Value {
             Self::Array(_) => "[Array]".to_owned(),
             Self::Function(_) | Self::NativeFn(_) => "[Function]".to_owned(),
             Self::Iterator(_) => "[Iterator]".to_owned(),
-            Self::Promise(_) => "[Promise]".to_owned(),
+            Self::Generator(_) => "[Generator]".to_owned(),
+            Self::Fiber(_) => "[Fiber]".to_owned(),
             Self::Null => "null".to_owned()
         }
     }
@@ -146,19 +149,11 @@ impl Value {
                 Self::String(_) => b"string",
                 Self::Array(_) => b"array",
                 Self::Dict(_) | Self::Instance(_) => b"object",
-                Self::Iterator(_) => b"iterator",
-                Self::Promise(_) => b"promise",
+                Self::Iterator(_) | Self::Fiber(_) => b"iterator",
+                Self::Generator(_) => b"Generator",
                 Self::Function(_) | Self::NativeFn(_) => b"function"
             }
         )
-    }
-
-    pub fn into_iter(&self) -> ValueIter {
-        match self {
-            Self::Iterator(ptr) => ptr.unwrap(),
-            Self::Array(ptr) => ValueIter::new(ptr.unwrap_ref()),
-            _ => ValueIter::default()
-        }
     }
 
     pub fn iter_next(&self) -> Option<Value> {
@@ -365,7 +360,8 @@ impl Hash for Value {
             Self::NativeFn(ptr) => hash_ptr!(ptr),
             Self::Iterator(ptr) => hash_ptr!(ptr),
             Self::Instance(ptr) => hash_ptr!(ptr),
-            Self::Promise(ptr) => hash_ptr!(ptr)
+            Self::Generator(ptr) => hash_ptr!(ptr),
+            Self::Fiber(ptr) => hash_ptr!(ptr)
         }
     }
 }
@@ -381,6 +377,8 @@ impl PartialEq for Value {
             (Value::Function(a), Value::Function(b)) => a == b,
             (Value::NativeFn(a), Value::NativeFn(b)) => a == b,
             (Value::Instance(a), Value::Instance(b)) => a == b,
+            (Value::Fiber(a), Value::Fiber(b)) => a == b,
+            (Value::Generator(a), Value::Generator(b)) => a == b,
             (Value::Null, Value::Null) => true,
             _ => false
         }
@@ -450,7 +448,8 @@ impl Display for Value {
             },
             Value::Function(_) | Value::NativeFn(_) => write!(f, "[Function]"),
             Value::Iterator(_) => write!(f, "[Iterator]"),
-            Value::Promise(promise) => write!(f, "[Promise<{}>]", promise.unwrap_str())
+            Value::Fiber(_) => write!(f, "[Fiber]"),
+            Value::Generator(_) => write!(f, "[Generator]")
         }
     }
 }

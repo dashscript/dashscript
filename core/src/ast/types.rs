@@ -45,6 +45,7 @@ pub enum Expr {
     Group(Box<Expr>), // (grouped_expr)
     Not(Box<Expr>), // (expr_to_invert)
     Await(Box<Expr>), // (await_expr)
+    Yield(Box<Expr>), // (yield_expr)
     Function {
         name: u32, // The function name constant register id
         parameters: Vec<u32>, // The parameters name registers

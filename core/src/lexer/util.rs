@@ -17,6 +17,7 @@ impl Lexer {
             "true" => TokenKind::True,
             "false" => TokenKind::False,
             "return" => TokenKind::Keyword(Keyword::Return),
+            "yield" => TokenKind::Keyword(Keyword::Yield),
             "if" => TokenKind::Keyword(Keyword::If),
             "elif" => TokenKind::Keyword(Keyword::Elif),
             "else" => TokenKind::Keyword(Keyword::Else),
@@ -33,6 +34,7 @@ impl Lexer {
     pub fn resolve_keyword(word: String) -> TokenKind {
         match word.as_str() {
             "return" => TokenKind::Keyword(Keyword::Return),
+            "yield" => TokenKind::Keyword(Keyword::Yield),
             "if" => TokenKind::Keyword(Keyword::If),
             "elif" => TokenKind::Keyword(Keyword::Elif),
             "else" => TokenKind::Keyword(Keyword::Else),

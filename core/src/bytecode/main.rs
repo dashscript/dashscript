@@ -63,6 +63,7 @@ pub struct Closure {
     pub locals: Vec<Local>,
     pub index: u16,
     pub max_slots: u8,
+    pub has_yield: bool
 }
 
 #[derive(Debug, Clone, Default)]
@@ -462,6 +463,11 @@ impl BytecodeCompiler {
                 self.load_expr(*expr);
                 self.bytes.push(AWAIT);
             },
+            Expr::Yield(expr) => {
+                self.load_expr(*expr);
+                self.bytes.push(YIELD);
+                self.closures.last_mut().unwrap().has_yield = true;
+            },
             Expr::Function { name, parameters, inner, .. } => {
                 self.bytes.extend_from_slice(&[FUNC, 0, 0]);
                 let offset_ip = self.bytes.len();
@@ -475,7 +481,8 @@ impl BytecodeCompiler {
                     locals: Vec::new(),
                     upvalues: Vec::new(),
                     index: self.depth,
-                    max_slots: parameters.len() as u8
+                    max_slots: parameters.len() as u8,
+                    has_yield: false
                 };
 
                 for constant_id in parameters {
@@ -502,7 +509,7 @@ impl BytecodeCompiler {
                 self.update_offset(offset_ip);
 
                 let closure = self.closures.pop().unwrap();
-                self.bytes.extend_from_slice(&[closure.max_slots, closure.upvalues.len() as u8]);
+                self.bytes.extend_from_slice(&[closure.has_yield as u8, closure.max_slots, closure.upvalues.len() as u8]);
                 for upvalue in &closure.upvalues {
                     self.bytes.extend_from_slice(&[upvalue.is_local as u8, upvalue.index]);
                 }
