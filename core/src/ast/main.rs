@@ -76,6 +76,7 @@ impl AST {
                         Keyword::Return => self.keyword_return(index),
                         Keyword::While => self.keyword_while(index),
                         Keyword::For => self.keyword_for(index),
+                        Keyword::Yield => self.keyword_yield(index),
                         Keyword::Break => Stmt { expr: Expr::Break, index },
                         Keyword::Continue => Stmt { expr: Expr::Continue, index },
                         Keyword::Await => Stmt { expr: self.expression_await(), index },
@@ -155,6 +156,10 @@ impl AST {
         };
 
         Stmt { expr, index }
+    }
+
+    pub fn keyword_yield(&mut self, index: usize) -> Stmt {
+        Stmt { expr: Expr::Yield(Box::new(self.expression(ASTErrorKind::ExpectedValue))), index }
     }
 
     pub fn keyword_import(&mut self, index: usize) -> Stmt {
@@ -710,6 +715,7 @@ impl AST {
                         Keyword::Return => self.keyword_return(index),
                         Keyword::While => self.keyword_while(index),
                         Keyword::For => self.keyword_for(index),
+                        Keyword::Yield => self.keyword_yield(index),
                         Keyword::Break => Stmt { expr: Expr::Break, index },
                         Keyword::Continue => Stmt { expr: Expr::Continue, index },
                         Keyword::Await => Stmt { expr: self.expression_await(), index },

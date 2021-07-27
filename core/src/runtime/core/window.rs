@@ -113,7 +113,7 @@ pub fn init(vm: &mut Vm) -> Value {
         }
     });
 
-    Value::Dict(window.allocate_value_ptr())
+    Value::Dict(window.allocate_with())
 }
 
 pub fn init_env(vm: &mut Vm) -> Value {
@@ -123,7 +123,7 @@ pub fn init_env(vm: &mut Vm) -> Value {
         match args.get(0) {
             Some(Value::String(bytes)) => {
                 match env::var(bytes.unwrap_ref() as &str) {
-                    Ok(var) => Value::String(vm.allocate_str_bytes(var.as_bytes())),
+                    Ok(var) => Value::String(vm.allocate_string_bytes(var.as_bytes())),
                     Err(_) => Value::Null
                 }
             },
@@ -158,10 +158,10 @@ pub fn init_env(vm: &mut Vm) -> Value {
             map.insert(Value::String(vm.allocate_string(key)), (Value::String(vm.allocate_string(value)), true));
         }
 
-        Ok(Value::Dict(vm.allocate_value_ptr(map)))
+        Ok(Value::Dict(vm.allocate_with(map)))
     });
 
-    Value::Dict(env.allocate_value_ptr())
+    Value::Dict(env.allocate_with())
 }
 
 pub fn init_permissions(vm: &mut Vm) -> Value {
@@ -171,10 +171,10 @@ pub fn init_permissions(vm: &mut Vm) -> Value {
     permissions.constant("read", Value::Bool(vm_permissions.read));
     permissions.constant("write", Value::Bool(vm_permissions.write));
     permissions.constant("memory", Value::Bool(vm_permissions.memory));
-    permissions.constant("childProcess", Value::Bool(vm_permissions.child_process));
-    permissions.constant("unsafe", Value::Bool(vm_permissions.unsafe_libs));
+    permissions.constant("childProcess", Value::Bool(vm_permissions.process));
+    permissions.constant("unsafe", Value::Bool(vm_permissions._unsafe));
 
-    Value::Dict(permissions.allocate_value_ptr())
+    Value::Dict(permissions.allocate_with())
 }
 
 pub fn init_fs<'a>(window: &mut MapBuilder<'a>) {
@@ -190,7 +190,7 @@ pub fn init_fs<'a>(window: &mut MapBuilder<'a>) {
                 None => TinyString::new(&[])
             };
     
-            Ok(Value::String(vm.allocate_value_ptr(cwd)))
+            Ok(Value::String(vm.allocate_with(cwd)))
         });
 
         window.native_fn("execPath", |vm, _| {
@@ -204,7 +204,7 @@ pub fn init_fs<'a>(window: &mut MapBuilder<'a>) {
                 Err(error) => return Err(RuntimeError::new(vm, error))
             };
     
-            Ok(Value::String(vm.allocate_value_ptr(exec_path)))
+            Ok(Value::String(vm.allocate_with(exec_path)))
         });
 
         window.native_fn("readTextFile", |vm, args| {
@@ -260,7 +260,7 @@ pub fn init_fs<'a>(window: &mut MapBuilder<'a>) {
 }
 
 pub fn init_process<'a>(window: &mut MapBuilder<'a>) {
-    if !window.vm.permissions.child_process {
+    if !window.vm.permissions.process {
         return;
     }
 

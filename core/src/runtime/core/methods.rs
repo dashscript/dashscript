@@ -11,7 +11,7 @@ pub mod iterator {
 
     pub fn init(vm: &mut Vm) {
         methods!(vm.iterator_methods, {
-            "clone" => |vm, iterator, _, _| Ok(Value::Iterator(vm.allocate_value_ptr(iterator.clone()))),
+            "clone" => |vm, iterator, _, _| Ok(Value::Iterator(vm.allocate_with(iterator.clone()))),
             "current" => |_, iterator, _, _| Ok(iterator.current()),
             "next" => |_, iterator, _, _| Ok(
                 match iterator.next() {
@@ -24,19 +24,19 @@ pub mod iterator {
         let mut iterator_object = MapBuilder::new(vm);
 
         iterator_object.native_fn("empty", |vm, _| {
-            Ok(Value::Iterator(vm.allocate_value_ptr(ValueIter::default())))
+            Ok(Value::Iterator(vm.allocate_with(ValueIter::default())))
         });
 
         iterator_object.native_fn("from", |vm, args| {
             let iter = match args.get(0) {
                 Some(value) => vm.iter_value(*value),
-                None => Value::Iterator(vm.allocate_value_ptr(ValueIter::default()))
+                None => Value::Iterator(vm.allocate_with(ValueIter::default()))
             };
 
             Ok(iter)
         });
 
-        let iterator = Value::Dict(iterator_object.allocate_value_ptr());
+        let iterator = Value::Dict(iterator_object.allocate_with());
         vm.add_global("Iterator", iterator);
     }
 
@@ -96,7 +96,7 @@ pub mod string {
                             result.push(Value::String(vm.allocate_static_str(item)));
                         }
 
-                        Value::Array(vm.allocate_value_ptr(result))
+                        Value::Array(vm.allocate_with(result))
                     },
                     _ => Value::Null
                 }
@@ -117,7 +117,7 @@ pub mod string {
                 match args.get(0..2) {
                     Some(&[start, end]) => {
                         match string.deref().get(start.to_usize()..end.to_usize()) {
-                            Some(string) => Value::String(vm.allocate_str_bytes(string.as_bytes())),
+                            Some(string) => Value::String(vm.allocate_string_bytes(string.as_bytes())),
                             None => Value::Null
                         }
                     },
@@ -131,7 +131,7 @@ pub mod string {
                     bytes.push(Value::Int(*byte as isize));
                 }
 
-                Ok(Value::Array(vm.allocate_value_ptr(bytes)))
+                Ok(Value::Array(vm.allocate_with(bytes)))
             },
         });
 
@@ -153,7 +153,7 @@ pub mod string {
             match args.get(0) {
                 Some(value) => {
                     match std::char::from_u32(value.to_u32()) {
-                        Some(char_) => Value::String(vm.allocate_value_ptr(TinyString::new(char_.encode_utf8(&mut [0; 4]).as_bytes()))),
+                        Some(char_) => Value::String(vm.allocate_with(TinyString::new(char_.encode_utf8(&mut [0; 4]).as_bytes()))),
                         None => Value::Null
                     }
                 },
@@ -161,7 +161,7 @@ pub mod string {
             }
         ));
 
-        let string = Value::Dict(string_object.allocate_value_ptr());
+        let string = Value::Dict(string_object.allocate_with());
         vm.add_global("String", string)
     }
 
@@ -182,7 +182,7 @@ pub mod boolean {
             }
         )));
 
-        let boolean = Value::Dict(boolean_object.allocate_value_ptr());
+        let boolean = Value::Dict(boolean_object.allocate_with());
         vm.add_global("Boolean", boolean);
     }
 
@@ -201,7 +201,7 @@ pub mod object {
                 Some(Value::Dict(ptr)) => {
                     let mut object = Map::with_capacity(1);
                     object.insert(vm.constants.prototype, (Value::Dict(*ptr), true));
-                    Value::Dict(vm.allocate_value_ptr(object))
+                    Value::Dict(vm.allocate_with(object))
                 },
                 _ => return Err(RuntimeError::new(vm, "[Object.create]: Expected (object) arguments."))
             }
@@ -268,18 +268,18 @@ pub mod object {
                 Some(Value::Dict(ptr)) => {
                     let mut entries = Vec::new();
                     for (key, value) in ptr.unwrap_ref() {
-                        entries.push(Value::Array(vm.allocate_value_ptr(vec![*key, value.0])))
+                        entries.push(Value::Array(vm.allocate_with(vec![*key, value.0])))
                     }
 
-                    Value::Array(vm.allocate_value_ptr(entries))
+                    Value::Array(vm.allocate_with(entries))
                 },
                 Some(Value::Instance(ptr)) => {
                     let mut entries = Vec::new();
                     for (key, value) in ptr.unwrap_map() {
-                        entries.push(Value::Array(vm.allocate_value_ptr(vec![*key, value.0])))
+                        entries.push(Value::Array(vm.allocate_with(vec![*key, value.0])))
                     }
 
-                    Value::Array(vm.allocate_value_ptr(entries))
+                    Value::Array(vm.allocate_with(entries))
                 },
                 _ => Value::Null
             }
@@ -293,7 +293,7 @@ pub mod object {
                         keys.push(*key);
                     }
 
-                    Value::Array(vm.allocate_value_ptr(keys))
+                    Value::Array(vm.allocate_with(keys))
                 },
                 Some(Value::Instance(ptr)) => {
                     let mut keys = Vec::new();
@@ -301,7 +301,7 @@ pub mod object {
                         keys.push(*key);
                     }
 
-                    Value::Array(vm.allocate_value_ptr(keys))
+                    Value::Array(vm.allocate_with(keys))
                 },
                 _ => Value::Null
             }
@@ -315,7 +315,7 @@ pub mod object {
                         values.push(*value);
                     }
 
-                    Value::Array(vm.allocate_value_ptr(values))
+                    Value::Array(vm.allocate_with(values))
                 },
                 Some(Value::Instance(ptr)) => {
                     let mut values = Vec::new();
@@ -323,7 +323,7 @@ pub mod object {
                         values.push(*value);
                     }
 
-                    Value::Array(vm.allocate_value_ptr(values))
+                    Value::Array(vm.allocate_with(values))
                 },
                 _ => Value::Null
             }
@@ -353,8 +353,8 @@ pub mod object {
 
         object_.native_fn("clone", |vm, args| Ok(
             match args.get(0) {
-                Some(Value::Dict(ptr)) => Value::Dict(vm.allocate_value_ptr(ptr.unwrap())),
-                Some(Value::Instance(ptr)) => Value::Instance(vm.allocate_value_ptr(ptr.unwrap())),
+                Some(Value::Dict(ptr)) => Value::Dict(vm.allocate_with(ptr.unwrap())),
+                Some(Value::Instance(ptr)) => Value::Instance(vm.allocate_with(ptr.unwrap())),
                 _ => Value::Null
             }
         ));
@@ -390,7 +390,7 @@ pub mod object {
             Ok(Value::Null)
         });
 
-        let object = Value::Dict(object_.allocate_value_ptr());
+        let object = Value::Dict(object_.allocate_with());
         vm.add_global("Object", object);
     }
 
@@ -403,7 +403,7 @@ pub mod function {
 
     pub fn init(vm: &mut Vm) {
         let mut function_object = MapBuilder::new(vm);
-        let noop = function_object.vm.allocate_value_ptr(NativeFunction {
+        let noop = function_object.vm.allocate_with(NativeFunction {
             func: |_, _| Ok(Value::Null),
             name: TinyString::new(b"noop")
         });
@@ -417,7 +417,7 @@ pub mod function {
                 _ => return Ok(Value::Null)
             };
 
-            Ok(Value::String(vm.allocate_str_bytes(name)))
+            Ok(Value::String(vm.allocate_string_bytes(name)))
         });
 
         function_object.native_fn("isNative", |_, args| Ok(Value::Bool(
@@ -427,7 +427,7 @@ pub mod function {
             }
         )));
 
-        let function = Value::Dict(function_object.allocate_value_ptr());
+        let function = Value::Dict(function_object.allocate_with());
         vm.add_global("Function", function);
     }
 
@@ -445,7 +445,7 @@ pub mod array {
     pub fn init(vm: &mut Vm) {
         methods!(vm.array_methods, {
             "len" => |_, array, _, _| Ok(Value::Int(array.len() as isize)),
-            "clone" => |vm, array, _,  _| Ok(Value::Array(vm.allocate_value_ptr(array.clone()))),
+            "clone" => |vm, array, _,  _| Ok(Value::Array(vm.allocate_with(array.clone()))),
             "isEmpty" => |_, array, _, _| Ok(Value::Bool(array.len() == 0)),
             "concat" => |vm, array, ptr, args| Ok(
                 match args.get(0) {
@@ -453,7 +453,7 @@ pub mod array {
                         let mut array = array.clone();
                         array.extend(ptr.unwrap_ref());
 
-                        Value::Array(vm.allocate_value_ptr(array))
+                        Value::Array(vm.allocate_with(array))
                     },
                     _ => ptr_as_value_array(ptr)
                 }
@@ -506,7 +506,7 @@ pub mod array {
                     index += 1;
                 }
 
-                Ok(Value::Array(vm.allocate_value_ptr(values)))
+                Ok(Value::Array(vm.allocate_with(values)))
             },
             "find" => |vm, array, _, args| {
                 let mut index = 0;
@@ -606,7 +606,7 @@ pub mod array {
             "join" => |vm, array, _, args| {
                 let seperator = match args.get(0) {
                     Some(Value::String(ptr)) if array.len() != 0 => ptr.unwrap_bytes(),
-                    _ => return Ok(Value::String(vm.allocate_str_bytes(&[])))
+                    _ => return Ok(Value::String(vm.allocate_string_bytes(&[])))
                 };
 
                 let mut bytes = Vec::new();
@@ -624,7 +624,7 @@ pub mod array {
                     index += 1;
                 }
 
-                Ok(Value::String(vm.allocate_str_bytes(bytes.as_slice())))
+                Ok(Value::String(vm.allocate_string_bytes(bytes.as_slice())))
             },
             "map" => |vm, array, _, args| {
                 let mut index = 0;
@@ -644,7 +644,7 @@ pub mod array {
                     index += 1;
                 }
 
-                Ok(Value::Array(vm.allocate_value_ptr(result)))
+                Ok(Value::Array(vm.allocate_with(result)))
             },
             "pop" => |_, array, _, _| {
                 Ok(array.pop().unwrap_or(Value::Null))
@@ -699,7 +699,7 @@ pub mod array {
                         chars.push(Value::String(vm.allocate_static_str(char_.encode_utf8(&mut [0; 4]))));
                     }
 
-                    vm.allocate_value_ptr(chars)
+                    vm.allocate_with(chars)
                 },
                 Some(Value::Iterator(ptr)) => {
                     let mut items = Vec::new();
@@ -709,9 +709,9 @@ pub mod array {
                         items.push(item);
                     }
 
-                    vm.allocate_value_ptr(items)
+                    vm.allocate_with(items)
                 },
-                _ => vm.allocate_value_ptr(Vec::new())
+                _ => vm.allocate_with(Vec::new())
             }
         )));
 
@@ -724,10 +724,10 @@ pub mod array {
 
             let mut array = Vec::with_capacity(cap);
             array.resize_with(cap, || Value::Null);
-            Ok(Value::Array(vm.allocate_value_ptr(array)))
+            Ok(Value::Array(vm.allocate_with(array)))
         });
 
-        let array = Value::Dict(array_object.allocate_value_ptr());
+        let array = Value::Dict(array_object.allocate_with());
         vm.add_global("Array", array);
     }
 

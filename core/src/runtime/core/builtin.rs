@@ -148,7 +148,7 @@ pub fn init_math(vm: &mut Vm) -> Value {
     math.native_fn("randomUint", |_, _| Ok(Value::Int(random_usize() as isize)));
     math.native_fn("randomInt", |_, _| Ok(Value::Int(random_isize())));
 
-    Value::Dict(math.allocate_value_ptr())
+    Value::Dict(math.allocate_with())
 }
 
 pub fn init_date(vm: &mut Vm) -> Value {
@@ -377,14 +377,14 @@ pub fn init_date(vm: &mut Vm) -> Value {
         set_amount!(vm, args, date::MS_PER_HOUR)
     });
 
-    Value::Dict(date.allocate_value_ptr())
+    Value::Dict(date.allocate_with())
 }
 
 pub fn init_json(vm: &mut Vm) -> Value {
     let mut json = MapBuilder::new(vm);
 
     json.native_fn("stringify", |vm, args| {
-        let string = vm.allocate_value_ptr(
+        let string = vm.allocate_with(
             TinyString::new(
                 args.get(0)
                     .unwrap_or_default()
@@ -396,7 +396,7 @@ pub fn init_json(vm: &mut Vm) -> Value {
         Ok(Value::String(string))
     });
 
-    Value::Dict(json.allocate_value_ptr())
+    Value::Dict(json.allocate_with())
 }
 
 pub fn init_process(vm: &mut Vm) -> Value {
@@ -404,7 +404,7 @@ pub fn init_process(vm: &mut Vm) -> Value {
 
     process.init(|vm, args| {
         // Unsafe becase this can chaneg stuff of other resources by wrong rid.
-        if !vm.permissions.unsafe_libs {
+        if !vm.permissions._unsafe {
             return Err(RuntimeError::new(vm, "[Process.init]: Initiating process manually requires the `--unsafe` flag."))
         }
 
@@ -426,7 +426,7 @@ pub fn init_process(vm: &mut Vm) -> Value {
         }
     });
 
-    let (class, prototype) = process.allocate_value_ptr_with_prototype();
+    let (class, prototype) = process.allocate_with_with_prototype();
     vm.constants.process_prototype = prototype;
 
     Value::Dict(class)
@@ -454,7 +454,7 @@ pub fn initiate_process_instance(
 
     if_let_stdio! { stdout stdin stderr }
 
-    Value::Instance(vm.allocate_value_ptr(
+    Value::Instance(vm.allocate_with(
         Instance { 
             properties, 
             methods: vm.constants.process_prototype

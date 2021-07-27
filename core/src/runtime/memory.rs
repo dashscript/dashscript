@@ -4,7 +4,7 @@ use alloc::alloc::Layout;
 use std::marker::PhantomData;
 use std::{ptr, mem};
 use std::fmt::{self, Debug, Formatter};
-use crate::{Value, Map, ValueIter, TinyString, Instance, Generator, Fiber};
+use crate::{Value, Map, ValueIter, TinyString, Instance, Generator, FiberHandle};
 use super::object::{self, ObjectKind};
 
 pub(crate) const USIZE_SIZE: usize = mem::size_of::<usize>();
@@ -144,7 +144,7 @@ impl GcHandle {
             ObjectKind::Iterator => deallocate!(self.0, ValueIter),
             ObjectKind::String => deallocate!(self.0, TinyString),
             ObjectKind::Instance => deallocate!(self.0, object::Instance),
-            ObjectKind::Fiber => deallocate!(self.0, Fiber),
+            ObjectKind::Fiber => deallocate!(self.0, FiberHandle),
             ObjectKind::Generator => deallocate!(self.0, Generator)
         }
     }
@@ -165,7 +165,7 @@ impl GcHandle {
                 ObjectKind::Iterator => deallocate!(self.0, ValueIter),
                 ObjectKind::String => deallocate!(self.0, TinyString),
                 ObjectKind::Instance => deallocate!(self.0, object::Instance),
-                ObjectKind::Fiber => deallocate!(self.0, Fiber),
+                ObjectKind::Fiber => deallocate!(self.0, FiberHandle),
                 ObjectKind::Generator => deallocate!(self.0, Generator)
             };
 

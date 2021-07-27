@@ -1,6 +1,6 @@
 use std::fmt::{self, Debug, Formatter};
 use std::collections::HashMap;
-use crate::{RuntimeResult, Value, TinyString, Vm, Upvalue, ValueIter, ValuePtr, Fiber};
+use crate::{RuntimeResult, Value, TinyString, Vm, Upvalue, ValueIter, ValuePtr, FiberHandle};
 
 #[derive(Debug, Clone, Copy)]
 pub enum ObjectKind {
@@ -78,5 +78,5 @@ impl_default_object_trait! {
     ValueIter: Iterator
     TinyString: String
     Instance: Instance
-    Fiber: Fiber
+    FiberHandle: Fiber
 }

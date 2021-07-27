@@ -55,11 +55,11 @@ impl<'a, 'de> Visitor<'de> for ValueVisitor<'a> {
     }
 
     fn visit_str<E>(self, value: &str) -> Result<Value, E> {
-        Ok(Value::String(self.0.allocate_str_bytes(value.as_bytes())))
+        Ok(Value::String(self.0.allocate_string_bytes(value.as_bytes())))
     }
 
     fn visit_string<E>(self, value: String) -> Result<Value, E> {
-        Ok(Value::String(self.0.allocate_str_bytes(value.as_bytes())))
+        Ok(Value::String(self.0.allocate_string_bytes(value.as_bytes())))
     }
 
     fn visit_none<E>(self) -> Result<Value, E> {

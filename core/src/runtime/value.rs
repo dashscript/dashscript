@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::string::ToString;
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter};
-use crate::{TinyString, Map, ValueIter, Vm, ValuePtr, Function, NativeFunction, Instance, Fiber, Generator};
+use crate::{TinyString, Map, ValueIter, Vm, ValuePtr, Function, NativeFunction, Instance, FiberHandle, Generator};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Value {
@@ -20,7 +20,7 @@ pub enum Value {
     Iterator(ValuePtr<ValueIter>),
     Instance(ValuePtr<Instance>),
     Generator(ValuePtr<Generator>),
-    Fiber(ValuePtr<Fiber>),
+    Fiber(ValuePtr<FiberHandle>),
     Null // The basic null or empty value
 }
 
@@ -170,7 +170,7 @@ impl Value {
             (Self::Int(a), Self::Float(b)) => Self::Float(a as f64 + b),
             (Self::Float(a), Self::Int(b)) => Self::Float(a + b as f64),
             (Self::Null, value) => value,
-            (lhs, rhs) => Self::String(vm.allocate_value_ptr(lhs.to_tiny_string() + rhs.to_tiny_string()))
+            (lhs, rhs) => Self::String(vm.allocate_with(lhs.to_tiny_string() + rhs.to_tiny_string()))
         }
     }
 

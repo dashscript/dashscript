@@ -12,4 +12,4 @@ name = "dash"
 path = "./src/main.rs"
 
 [dependencies]
-dashscript_core = { path = "../core/", version = "1.0.0", features = ["debug_fiber"] }
+dashscript_core = { path = "../core/", version = "1.0.0" }

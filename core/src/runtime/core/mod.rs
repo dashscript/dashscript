@@ -49,7 +49,7 @@ pub fn init(vm: &mut Vm) {
             let name = TinyString::new($bytes);
             let constant_id = vm.chunk.constants.add_string(name.clone());
             let nf = NativeFunction { name, func: $value };
-            let ptr = vm.allocate_value_ptr(nf);
+            let ptr = vm.allocate_with(nf);
             vm.globals.insert(constant_id, (Value::NativeFn(ptr), false));
         }};
     }
@@ -71,7 +71,7 @@ pub fn init(vm: &mut Vm) {
     });
 
     native_fn!(b"typeof", |vm, args| {
-        let type_ = vm.allocate_value_ptr(args.get(0).unwrap_or_default().get_type());
+        let type_ = vm.allocate_with(args.get(0).unwrap_or_default().get_type());
         Ok(Value::String(type_))
     });
 
@@ -104,7 +104,7 @@ pub fn init(vm: &mut Vm) {
     native_fn!(b"readline", |vm, _| {
         let mut line = String::new();
         match io::stdin().read_line(&mut line) {
-            Ok(_) => Ok(Value::String(vm.allocate_str_bytes(line.as_bytes()))),
+            Ok(_) => Ok(Value::String(vm.allocate_string_bytes(line.as_bytes()))),
             Err(_) => Ok(Value::Null) // Incase if there is an error it returns null
         }
     });
@@ -130,14 +130,14 @@ pub fn init(vm: &mut Vm) {
             vec.push(Value::Int(i));
         }
 
-        Ok(Value::Iterator(vm.allocate_value_ptr(ValueIter::new(vec.as_slice()))))
+        Ok(Value::Iterator(vm.allocate_with(ValueIter::new(vec.as_slice()))))
     });
 
     native_fn!(b"btoa", |vm, args| Ok(
         match args.get(0) {
             Some(Value::String(ptr)) => Value::String(
                 match base64::encode(ptr.unwrap_bytes()) {
-                    Some(str_) => vm.allocate_value_ptr(str_),
+                    Some(str_) => vm.allocate_with(str_),
                     None => vm.allocate_static_str("")
                 }
             ),
@@ -149,7 +149,7 @@ pub fn init(vm: &mut Vm) {
         match args.get(0) {
             Some(Value::String(ptr)) => {
                 match base64::decode(ptr.unwrap_bytes()) {
-                    Ok(str_) => Value::String(vm.allocate_value_ptr(str_)),
+                    Ok(str_) => Value::String(vm.allocate_with(str_)),
                     Err(error) => {
                         let message = match error {
                             DecoderError::InvalidLength => format!("[atob]: The base64 string has invalid length."),

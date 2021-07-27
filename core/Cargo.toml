@@ -9,7 +9,6 @@ keywords = ["core", "dashscript"]
 
 [features]
 stress_gc = [] # Stresses gc on each allocation.
-debug_fiber = [] # To distinguish fibers with id. Used for debugging.
 
 [dependencies]
 serde_json = "1.0.64"

@@ -58,7 +58,7 @@ impl RuntimeError {
     }
 
     pub(crate) fn to_value(self, vm: &mut Vm) -> Value {
-        Value::String(vm.allocate_value_ptr(self.message))
+        Value::String(vm.allocate_with(self.message))
     }
 
 }
